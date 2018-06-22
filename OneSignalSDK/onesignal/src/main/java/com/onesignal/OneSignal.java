@@ -1622,8 +1622,8 @@ public class OneSignal {
             JSONObject customJSON = new JSONObject(data.optString("custom"));
 
             if (customJSON.has("u")) {
-                String url = customJSON.optString("u", null);
-                if (!url.contains("://"))
+               String url = customJSON.optString("u", null);
+               if (!url.contains("://"))
                   url = "http://" + url;
 
                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url.trim()));
