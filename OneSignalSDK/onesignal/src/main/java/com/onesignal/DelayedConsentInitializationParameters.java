@@ -1,7 +1,9 @@
+package com.onesignal;
+
 /**
  * Modified MIT License
- * 
- * Copyright 2018 OneSignal
+ *
+ * Copyright 2017 OneSignal
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -9,13 +11,13 @@
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * 1. The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * 2. All copies of substantial portions of the Software may only be used in connection
  * with services provided by OneSignal.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -25,15 +27,22 @@
  * THE SOFTWARE.
  */
 
-package com.onesignal;
-
 import android.content.Context;
+import com.onesignal.OneSignal.NotificationOpenedHandler;
+import com.onesignal.OneSignal.NotificationReceivedHandler;
 
-public interface PushRegistrator {
+class DelayedConsentInitializationParameters {
+    public Context context;
+    public String googleProjectNumber;
+    public String appId;
+    public NotificationOpenedHandler openedHandler;
+    public NotificationReceivedHandler receivedHandler;
 
-   interface RegisteredHandler {
-      void complete(String id, int status);
-   }
-
-   void registerForPush(Context context, String senderId, RegisteredHandler callback);
+    DelayedConsentInitializationParameters(Context delayContext, String delayGoogleProjectNumber, String delayAppId, NotificationOpenedHandler delayOpenedHandler, NotificationReceivedHandler delayReceivedHandler) {
+        this.context = delayContext;
+        this.googleProjectNumber = delayGoogleProjectNumber;
+        this.appId = delayAppId;
+        this.openedHandler = delayOpenedHandler;
+        this.receivedHandler = delayReceivedHandler;
+    }
 }

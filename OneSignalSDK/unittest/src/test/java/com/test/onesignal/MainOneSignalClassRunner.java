@@ -41,6 +41,7 @@ import android.database.sqlite.SQLiteDatabase;
 import android.location.Location;
 import android.net.ConnectivityManager;
 import android.os.Bundle;
+import android.util.Log;
 
 import com.onesignal.BuildConfig;
 import com.onesignal.OSEmailSubscriptionObserver;
@@ -73,12 +74,13 @@ import com.onesignal.ShadowOSUtils;
 import com.onesignal.ShadowOneSignal;
 import com.onesignal.ShadowOneSignalRestClient;
 import com.onesignal.OneSignalPackagePrivateHelper;
-import com.onesignal.ShadowPushRegistratorGPS;
+import com.onesignal.ShadowPushRegistratorGCM;
 import com.onesignal.ShadowRoboNotificationManager;
 import com.onesignal.StaticResetHelper;
 import com.onesignal.SyncJobService;
 import com.onesignal.SyncService;
 import com.onesignal.example.BlankActivity;
+import com.onesignal.OneSignal.ChangeTagsUpdateHandler;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -136,7 +138,7 @@ import static com.onesignal.ShadowOneSignalRestClient.REST_METHOD;
 @Config(packageName = "com.onesignal.example",
         shadows = {
            ShadowOneSignalRestClient.class,
-           ShadowPushRegistratorGPS.class,
+           ShadowPushRegistratorGCM.class,
            ShadowOSUtils.class,
            ShadowAdvertisingIdProviderGPS.class,
            ShadowCustomTabsClient.class,
@@ -292,7 +294,7 @@ public class MainOneSignalClassRunner {
 
       OneSignalInit();
       threadAndTaskWait();
-      assertEquals("87654321", ShadowPushRegistratorGPS.lastProjectNumber);
+      assertEquals("87654321", ShadowPushRegistratorGCM.lastProjectNumber);
 
       // A 2nd init call
       OneSignalInit();
@@ -305,7 +307,7 @@ public class MainOneSignalClassRunner {
 
       // Make sure when we try to register again before our on_session call it is with the remote
       // project number instead of the local one.
-      assertEquals("87654321", ShadowPushRegistratorGPS.lastProjectNumber);
+      assertEquals("87654321", ShadowPushRegistratorGCM.lastProjectNumber);
    }
 
    @Test
@@ -369,7 +371,7 @@ public class MainOneSignalClassRunner {
       OneSignalInit();
       threadAndTaskWait();
 
-      assertThat(ShadowPushRegistratorGPS.lastProjectNumber, not("123456789"));
+      assertThat(ShadowPushRegistratorGCM.lastProjectNumber, not("123456789"));
    }
    
    @Test
@@ -377,7 +379,7 @@ public class MainOneSignalClassRunner {
       // Get call will not return a Google project number if it hasn't been entered on the OneSignal dashboard.
       ShadowOneSignalRestClient.nextSuccessResponse = "{\"awl_list\": {}}";
       // Don't fire the mock callback, it will be done from the real class.
-      ShadowPushRegistratorGPS.skipComplete = true;
+      ShadowPushRegistratorGCM.skipComplete = true;
       
       OneSignal.init(blankActivity, null, ONESIGNAL_APP_ID);
       threadAndTaskWait();
@@ -397,7 +399,7 @@ public class MainOneSignalClassRunner {
       ShadowOneSignalRestClient.nextSuccessResponse = androidParams.toString();
       
       // Don't fire the mock callback, it will be done from the real class.
-//      ShadowPushRegistratorGPS.skipComplete = true;
+//      ShadowPushRegistratorGCM.skipComplete = true;
       
       OneSignal.init(blankActivity, null, ONESIGNAL_APP_ID);
       threadAndTaskWait();
@@ -578,7 +580,7 @@ public class MainOneSignalClassRunner {
 
    @Test
    public void testUnsubscribeStatusShouldBeSetIfGCMErrored() throws Exception {
-      ShadowPushRegistratorGPS.fail = true;
+      ShadowPushRegistratorGCM.fail = true;
       OneSignalInit();
       threadAndTaskWait();
       assertEquals(-7, ShadowOneSignalRestClient.lastPost.getInt("notification_types"));
@@ -589,15 +591,21 @@ public class MainOneSignalClassRunner {
       GetIdsAvailable();
       // A more real test would be "missing support library" but bad project number is an easier setup
       //   and is testing the same logic.
-      ShadowPushRegistratorGPS.fail = true;
+      ShadowPushRegistratorGCM.fail = true;
       OneSignalInitWithBadProjectNum();
-
       threadAndTaskWait();
       Robolectric.getForegroundThreadScheduler().runOneTask();
-      assertEquals(-7, ShadowOneSignalRestClient.lastPost.getInt("notification_types"));
 
+      assertEquals(-7, ShadowOneSignalRestClient.lastPost.getInt("notification_types"));
       // Test that idsAvailable still fires
       assertEquals(ShadowOneSignalRestClient.pushUserId, callBackUseId);
+      assertNull(getCallBackRegId); // Since GCM registration failed, this should be null
+
+      // We now get a push token after the device registers with Onesignal,
+      //    the idsAvailable callback should fire a 2nd time with a registrationId automatically
+      ShadowPushRegistratorGCM.manualFireRegisterForPush();
+      threadAndTaskWait();
+      assertEquals(ShadowPushRegistratorGCM.regId, getCallBackRegId);
    }
 
    @Test
@@ -609,7 +617,7 @@ public class MainOneSignalClassRunner {
       ShadowOneSignalRestClient.lastPost = null;
       restartAppAndElapseTimeToNextSession();
 
-      ShadowPushRegistratorGPS.fail = true;
+      ShadowPushRegistratorGCM.fail = true;
       OneSignalInit();
       threadAndTaskWait();
       assertFalse(ShadowOneSignalRestClient.lastPost.has("notification_types"));
@@ -618,7 +626,7 @@ public class MainOneSignalClassRunner {
    @Test
    public void testInvalidGoogleProjectNumberWithFailedRegisterResponse() throws Exception {
       // Ensures lower number notification_types do not over right higher numbered ones.
-      ShadowPushRegistratorGPS.fail = true;
+      ShadowPushRegistratorGCM.fail = true;
       GetIdsAvailable();
       OneSignalInitWithBadProjectNum();
 
@@ -635,10 +643,10 @@ public class MainOneSignalClassRunner {
       GetIdsAvailable();
       OneSignalInit();
       threadAndTaskWait();
-      assertEquals(ShadowPushRegistratorGPS.regId, ShadowOneSignalRestClient.lastPost.getString("identifier"));
+      assertEquals(ShadowPushRegistratorGCM.regId, ShadowOneSignalRestClient.lastPost.getString("identifier"));
 
       Robolectric.getForegroundThreadScheduler().runOneTask();
-      assertEquals(ShadowPushRegistratorGPS.regId, getCallBackRegId);
+      assertEquals(ShadowPushRegistratorGCM.regId, getCallBackRegId);
 
       OneSignal.setSubscription(false);
       GetIdsAvailable();
@@ -702,14 +710,14 @@ public class MainOneSignalClassRunner {
 
    @Test
    public void shouldUpdateNotificationTypesCorrectlyEvenWhenSetSubscriptionIsCalledInAnErrorState() throws Exception {
-      ShadowPushRegistratorGPS.fail = true;
+      ShadowPushRegistratorGCM.fail = true;
       OneSignalInit();
       threadAndTaskWait();
       OneSignal.setSubscription(true);
 
       // Restart app - Should send subscribe with on_session call.
       fastAppRestart();
-      ShadowPushRegistratorGPS.fail = false;
+      ShadowPushRegistratorGCM.fail = false;
       OneSignalInit();
       threadAndTaskWait();
       assertEquals(1, ShadowOneSignalRestClient.lastPost.getInt("notification_types"));
@@ -748,7 +756,7 @@ public class MainOneSignalClassRunner {
    @Test
    public void shouldNotFireIdsAvailableWithoutUserId() throws Exception {
       ShadowOneSignalRestClient.failNext = true;
-      ShadowPushRegistratorGPS.fail = true;
+      ShadowPushRegistratorGCM.fail = true;
 
       OneSignal.idsAvailable(new OneSignal.IdsAvailableHandler() {
          @Override
@@ -766,16 +774,16 @@ public class MainOneSignalClassRunner {
    @Test
    public void testGCMTimeOutThenSuccessesLater() throws Exception {
       // Init with a bad connection to Google.
-      ShadowPushRegistratorGPS.fail = true;
+      ShadowPushRegistratorGCM.fail = true;
       OneSignalInit();
       threadAndTaskWait();
       assertFalse(ShadowOneSignalRestClient.lastPost.has("identifier"));
 
       // Registers for GCM after a retry
-      ShadowPushRegistratorGPS.fail = false;
-      ShadowPushRegistratorGPS.manualFireRegisterForPush();
+      ShadowPushRegistratorGCM.fail = false;
+      ShadowPushRegistratorGCM.manualFireRegisterForPush();
       threadAndTaskWait();
-      assertEquals(ShadowPushRegistratorGPS.regId, ShadowOneSignalRestClient.lastPost.getString("identifier"));
+      assertEquals(ShadowPushRegistratorGCM.regId, ShadowOneSignalRestClient.lastPost.getString("identifier"));
 
       // Cold restart app, should not send the same identifier again.
       ShadowOneSignalRestClient.lastPost = null;
@@ -870,6 +878,10 @@ public class MainOneSignalClassRunner {
       assertEquals("value1.5", sentTags.getString("test1"));
       assertFalse(sentTags.has(("test2")));
       assertEquals("value3", sentTags.getString("test3"));
+
+      // Test empty JSONObject
+      OneSignal.sendTags(new JSONObject());
+      OneSignal.sendTags(new JSONObject(), null);
    }
 
    @Test
@@ -1236,7 +1248,7 @@ public class MainOneSignalClassRunner {
 
    @Test
    public void shouldNotAttemptToSendTagsBeforeGettingPlayerId() throws Exception {
-      ShadowPushRegistratorGPS.skipComplete = true;
+      ShadowPushRegistratorGCM.skipComplete = true;
       OneSignalInit();
       GetIdsAvailable();
       threadAndTaskWait();
@@ -1249,21 +1261,101 @@ public class MainOneSignalClassRunner {
 
       assertEquals(1, ShadowOneSignalRestClient.networkCallCount);
 
-      ShadowPushRegistratorGPS.fireLastCallback();
+      ShadowPushRegistratorGCM.fireLastCallback();
       threadAndTaskWait();
 
       assertEquals(2, ShadowOneSignalRestClient.networkCallCount);
       assertNotNull(callBackUseId);
    }
 
+   private class TestChangeTagsUpdateHandler implements ChangeTagsUpdateHandler {
+      private AtomicBoolean succeeded = new AtomicBoolean(false);
+      private AtomicBoolean failed = new AtomicBoolean(false);
+
+      @Override
+      public void onSuccess(JSONObject tags) {
+         succeeded.set(true);
+      }
+
+      @Override
+      public void onFailure(OneSignal.SendTagsError error) {
+         failed.set(true);
+      }
+
+      boolean getSucceeded() {
+         return succeeded.get();
+      }
+
+      boolean getFailed() {
+         return failed.get();
+      }
+   }
+
+   // Tests to make sure the onSuccess handler works
+   @Test
+   public void shouldSendNewTagsWithResponse() throws Exception {
+      OneSignalInit();
+      threadAndTaskWait();
+
+      TestChangeTagsUpdateHandler handler = new TestChangeTagsUpdateHandler();
+
+      OneSignal.sendTags(new JSONObject("{\"test\" : \"value\"}"), handler);
+
+      threadAndTaskWait();
+
+      assertTrue(handler.getSucceeded());
+
+      // now test to make sure the handler still fires for a call to
+      // sendTags() that doesn't modify existing tags (no JSON delta)
+
+      handler = new TestChangeTagsUpdateHandler();
+
+      OneSignal.sendTags(new JSONObject("{\"test\" : \"value\"}"), handler);
+
+      threadAndTaskWait();
+
+      assertTrue(handler.getSucceeded());
+   }
+
+   // Tests to make sure that the onFailure callback works
+   @Test
+   public void shouldFailToSendTagsWithResponse() throws Exception {
+      TestChangeTagsUpdateHandler handler = new TestChangeTagsUpdateHandler();
+
+      // should fail because there is no OneSignal player ID
+      OneSignal.sendTags(new JSONObject("{\"test\" : \"value\"}"), handler);
+
+      threadAndTaskWait();
+
+      assertTrue(handler.getFailed());
+   }
+
+   // Tests to make sure that the SDK will call both handlers
+   @Test
+   public void shouldCallMultipleHandlers() throws Exception {
+      OneSignalInit();
+      threadAndTaskWait();
+
+      TestChangeTagsUpdateHandler firstHandler = new TestChangeTagsUpdateHandler();
+      TestChangeTagsUpdateHandler secondHandler = new TestChangeTagsUpdateHandler();
+
+      OneSignal.sendTags(new JSONObject("{\"test1\" : \"value1\"}"), firstHandler);
+      OneSignal.sendTags(new JSONObject("{\"test2\" : \"value2\"}"), secondHandler);
+
+      threadAndTaskWait();
+
+      assertTrue(firstHandler.getSucceeded());
+      assertTrue(secondHandler.getSucceeded());
+   }
+
    @Test
    public void shouldCreatePlayerAfterDelayedTokenFromApplicationOnCreate() throws Exception {
-      ShadowPushRegistratorGPS.skipComplete = true;
+      ShadowPushRegistratorGCM.skipComplete = true;
       OneSignal.init(blankActivity.getApplicationContext(), "123456789", ONESIGNAL_APP_ID);
       blankActivityController.resume();
       threadAndTaskWait();
 
-      ShadowPushRegistratorGPS.fireLastCallback();
+      ShadowPushRegistratorGCM.fireLastCallback();
       threadAndTaskWait();
 
       ShadowOneSignalRestClient.Request createPlayer = ShadowOneSignalRestClient.requests.get(1);
@@ -1540,6 +1632,33 @@ public class MainOneSignalClassRunner {
       for(int a = 0; a < TOTAL_RUNS; a++) {
          List<Thread> threadList = new ArrayList<>(CONCURRENT_THREADS);
          for (int i = 0; i < CONCURRENT_THREADS; i++) {
+            Thread lastThread = newSendTagTestThread(Thread.currentThread(), a * i);
+            lastThread.start();
+            threadList.add(lastThread);
+            assertFalse(failedCurModTest);
+         }
+
+         OneSignalPackagePrivateHelper.runAllNetworkRunnables();
+
+         for(Thread thread : threadList)
+            thread.join();
+
+         assertFalse(failedCurModTest);
+         System.out.println("Pass " + a + " out of " + TOTAL_RUNS);
+      }
+   }
+
+   @Test
+   @Config(sdk = 26)
+   public void testFocusConcurrentModificationException() throws Exception {
+      OneSignalInit();
+      threadAndTaskWait();
+
+      final int TOTAL_RUNS = 75, CONCURRENT_THREADS = 15;
+      for(int a = 0; a < TOTAL_RUNS; a++) {
+         List<Thread> threadList = new ArrayList<>(CONCURRENT_THREADS);
+         for (int i = 0; i < CONCURRENT_THREADS; i++) {
+            OneSignalPackagePrivateHelper.OneSignal_onAppLostFocus();
             Thread lastThread = newSendTagTestThread(Thread.currentThread(), a * i);
             lastThread.start();
             threadList.add(lastThread);
@@ -2122,6 +2241,194 @@ public class MainOneSignalClassRunner {
       assertEquals(60, postEmail.payload.getInt("active_time"));
    }
 
+   @Test
+   public void gdprUserConsent() throws Exception {
+      OneSignal.setRequiresUserPrivacyConsent(true);
+
+      //check to ensure that the privacy consent status can never go from TRUE -> FALSE
+      OneSignal.setRequiresUserPrivacyConsent(false);
+      assertTrue(OneSignalPackagePrivateHelper.OneSignal_requiresUserPrivacyConsent());
+
+      //privacy consent state should still be set to true (user consent required)
+      OneSignalInit();
+
+      //the delayed params should now be set
+      assertNotNull(OneSignalPackagePrivateHelper.OneSignal_delayedInitParams());
+      assertNull(OneSignalPackagePrivateHelper.OneSignal_appId());
+
+      //test to make sure methods, such as PostNotification, don't execute without user consent
+      OneSignal.PostNotificationResponseHandler handler = new OneSignal.PostNotificationResponseHandler() {
+         @Override
+         public void onSuccess(JSONObject response) {
+            postNotificationSuccess = response;
+         }
+
+         @Override
+         public void onFailure(JSONObject response) {
+            postNotificationFailure = response;
+         }
+      };
+
+      OneSignal.postNotification("{}", handler);
+      threadAndTaskWait();
+      assertNull(postNotificationSuccess);
+      assertNull(postNotificationFailure);
+      postNotificationSuccess = postNotificationFailure = null;
+
+      OneSignal.provideUserConsent(true);
+
+      assertNull(OneSignalPackagePrivateHelper.OneSignal_delayedInitParams());
+      assertNotNull(OneSignalPackagePrivateHelper.OneSignal_appId());
+
+      // Not testing input here, just that HTTP 200 fires a success.
+      OneSignal.postNotification("{}", handler);
+      threadAndTaskWait();
+      assertNotNull(postNotificationSuccess);
+      assertNull(postNotificationFailure);
+      postNotificationSuccess = postNotificationFailure = null;
+   }
+
+   @Test
+   public void gdprRevokeUserConsent() throws Exception {
+      OneSignal.setRequiresUserPrivacyConsent(true);
+
+      //privacy consent state should still be set to true (user consent required)
+      OneSignalInit();
+
+      OneSignal.provideUserConsent(true);
+
+      threadAndTaskWait();
+
+      OneSignal.provideUserConsent(false);
+
+      threadAndTaskWait();
+
+      //test to make sure methods, such as PostNotification, don't execute without user consent
+      OneSignal.PostNotificationResponseHandler handler = new OneSignal.PostNotificationResponseHandler() {
+         @Override
+         public void onSuccess(JSONObject response) {
+            postNotificationSuccess = response;
+         }
+
+         @Override
+         public void onFailure(JSONObject response) {
+            postNotificationFailure = response;
+         }
+      };
+
+      OneSignal.postNotification("{}", handler);
+      threadAndTaskWait();
+      assertNull(postNotificationSuccess);
+      assertNull(postNotificationFailure);
+      postNotificationSuccess = postNotificationFailure = null;
+   }
+
+   @Test
+   public void shouldReturnCorrectConsentRequiredStatus() throws Exception {
+      OneSignal.setRequiresUserPrivacyConsent(true);
+
+      OneSignalInit();
+
+      assertTrue(OneSignal.requiresUserPrivacyConsent());
+
+      OneSignal.provideUserConsent(true);
+
+      assertFalse(OneSignal.requiresUserPrivacyConsent());
+   }
+
+   @Test
+   public void shouldReturnCorrectConsentRequiredStatusWhenSetBeforeInit() throws Exception {
+      OneSignal.setRequiresUserPrivacyConsent(true);
+      OneSignal.provideUserConsent(true);
+      OneSignalInit();
+      threadAndTaskWait();
+
+      assertTrue(OneSignal.userProvidedPrivacyConsent());
+
+      fastAppRestart();
+      OneSignalInit();
+      threadAndTaskWait();
+
+      assertTrue(OneSignal.userProvidedPrivacyConsent());
+   }
+
+
+   // Functions to add observers (like addSubscriptionObserver) should continue
+   // to work even if privacy consent has not been granted.
+   @Test
+   public void shouldAddSubscriptionObserverIfConsentNotGranted() throws Exception {
+      OneSignal.setRequiresUserPrivacyConsent(true);
+      OneSignalInit();
+      threadAndTaskWait();
+
+      OSSubscriptionObserver subscriptionObserver = new OSSubscriptionObserver() {
+         @Override
+         public void onOSSubscriptionChanged(OSSubscriptionStateChanges stateChanges) {
+            lastSubscriptionStateChanges = stateChanges;
+            currentSubscription = stateChanges.getTo().getSubscribed();
+         }
+      };
+      OneSignal.addSubscriptionObserver(subscriptionObserver);
+      lastSubscriptionStateChanges = null;
+      // Make sure garbage collection doesn't nuke any observers.
+      Runtime.getRuntime().gc();
+
+      OneSignal.provideUserConsent(true);
+      threadAndTaskWait();
+
+      // make sure the subscription observer was fired
+      assertTrue(lastSubscriptionStateChanges.getTo().getSubscribed());
+      assertFalse(lastSubscriptionStateChanges.getFrom().getSubscribed());
+   }
+
+   @Test
+   public void shouldAddPermissionObserverIfConsentNotGranted() throws Exception {
+      OneSignal.setRequiresUserPrivacyConsent(true);
+      OneSignalInit();
+      threadAndTaskWait();
+
+      OSPermissionObserver permissionObserver = new OSPermissionObserver() {
+         @Override
+         public void onOSPermissionChanged(OSPermissionStateChanges stateChanges) {
+            lastPermissionStateChanges = stateChanges;
+            currentPermission = stateChanges.getTo().getEnabled();
+         }
+      };
+      OneSignal.addPermissionObserver(permissionObserver);
+
+      OneSignal.provideUserConsent(true);
+      threadAndTaskWait();
+
+      // make sure the permission observer was fired
+      assertFalse(lastPermissionStateChanges.getFrom().getEnabled());
+      assertTrue(lastPermissionStateChanges.getTo().getEnabled());
+   }
+
+   @Test
+   public void shouldAddEmailSubscriptionObserverIfConsentNotGranted() throws Exception {
+      OneSignal.setRequiresUserPrivacyConsent(true);
+      OneSignalInit();
+      OSEmailSubscriptionObserver subscriptionObserver = new OSEmailSubscriptionObserver() {
+         @Override
+         public void onOSEmailSubscriptionChanged(OSEmailSubscriptionStateChanges stateChanges) {
+            lastEmailSubscriptionStateChanges = stateChanges;
+         }
+      };
+      OneSignal.addEmailSubscriptionObserver(subscriptionObserver);
+
+      OneSignal.provideUserConsent(true);
+      threadAndTaskWait();
+
+      OneSignal.setEmail("josh@onesignal.com");
+      threadAndTaskWait();
+
+      // make sure the email subscription observer was fired
+      assertNull(lastEmailSubscriptionStateChanges.getFrom().getEmailUserId());
+      assertEquals("b007f967-98cc-11e4-bed1-118f05be4522", lastEmailSubscriptionStateChanges.getTo().getEmailUserId());
+      assertEquals("josh@onesignal.com", lastEmailSubscriptionStateChanges.getTo().getEmailAddress());
+      assertTrue(lastEmailSubscriptionStateChanges.getTo().getSubscribed());
+   }
+
    /*
    // Can't get test to work from a app flow due to the main thread being locked one way or another in a robolectric env.
    // Running ActivityLifecycleListener.focusHandlerThread...advanceToNextPostedRunnable waits on the main thread.
@@ -2337,6 +2644,50 @@ public class MainOneSignalClassRunner {
       assertEquals(2.0, postEmailPayload.getDouble("long"));
       assertEquals(3.0, postEmailPayload.getDouble("loc_acc"));
       assertEquals(0.0, postEmailPayload.getDouble("loc_type"));
+   }
+
+   @Test
+   @Config(shadows = {ShadowGoogleApiClientBuilder.class, ShadowGoogleApiClientCompatProxy.class, ShadowFusedLocationApiWrapper.class})
+   public void shouldRegisterWhenPromptingAfterInit() throws Exception {
+      ShadowApplication.getInstance().grantPermissions("android.permission.ACCESS_COARSE_LOCATION");
+      ShadowGoogleApiClientCompatProxy.skipOnConnected = true;
+
+      // Test promptLocation right after init race condition
+      OneSignalInit();
+      OneSignal.promptLocation();
+
+      ShadowGoogleApiClientBuilder.connectionCallback.onConnected(null);
+      threadAndTaskWait();
+
+      ShadowOneSignalRestClient.Request request = ShadowOneSignalRestClient.requests.get(1);
+      assertEquals(REST_METHOD.POST, request.method);
+      assertEquals(1, request.payload.get("device_type"));
+      assertEquals(ShadowPushRegistratorGCM.regId, request.payload.get("identifier"));
+   }
+
+   @Test
+   @Config(shadows = {ShadowGoogleApiClientBuilder.class, ShadowGoogleApiClientCompatProxy.class, ShadowFusedLocationApiWrapper.class})
+   public void shouldCallOnSessionEvenIfSyncJobStarted() throws Exception {
+      ShadowApplication.getInstance().grantPermissions("android.permission.ACCESS_COARSE_LOCATION");
+
+      OneSignalInit();
+      threadAndTaskWait();
+
+      restartAppAndElapseTimeToNextSession();
+      ShadowGoogleApiClientCompatProxy.skipOnConnected = true;
+      OneSignalInit();
+
+      // TODO: Other, this sync seems to not omit PUT when there isn't anything to change....
+      SyncJobService syncJobService = Robolectric.buildService(SyncJobService.class).create().get();
+      syncJobService.onStartJob(null);
+      Thread.sleep(1_000); // Short sleep to wait for the Thread in the job to run
+      OneSignalPackagePrivateHelper.runAllNetworkRunnables();
+      ShadowGoogleApiClientBuilder.connectionCallback.onConnected(null);
+      threadAndTaskWait();
+
+      ShadowOneSignalRestClient.Request request = ShadowOneSignalRestClient.requests.get(3);
+      assertEquals(REST_METHOD.POST, request.method);
+      assertEquals("players/a2f7f967-e8cc-11e4-bed1-118f05be4511/on_session", request.url);
    }
 
    @Test
@@ -2664,7 +3015,7 @@ public class MainOneSignalClassRunner {
       // Test to make sure object was correct at the time of firing.
       assertTrue(currentSubscription);
       assertTrue(lastSubscriptionStateChanges.getTo().getUserSubscriptionSetting());
-      assertEquals(ShadowPushRegistratorGPS.regId, lastSubscriptionStateChanges.getTo().getPushToken());
+      assertEquals(ShadowPushRegistratorGCM.regId, lastSubscriptionStateChanges.getTo().getPushToken());
       assertEquals(ShadowOneSignalRestClient.pushUserId, lastSubscriptionStateChanges.getTo().getUserId());
    }
    
