@@ -144,6 +144,8 @@ public class OneSignalPackagePrivateHelper {
       }
    }
 
+   public static class PushRegistratorGCM extends com.onesignal.PushRegistratorGCM {}
+
    public static String NotificationChannelManager_createNotificationChannel(Context context, JSONObject payload) {
       NotificationGenerationJob notifJob = new NotificationGenerationJob(context);
       notifJob.jsonPayload = payload;
@@ -168,4 +170,17 @@ public class OneSignalPackagePrivateHelper {
    }
 
    public class OneSignalPrefs extends com.onesignal.OneSignalPrefs {}
+
+   public static void OneSignal_onAppLostFocus() {
+      OneSignal.onAppLostFocus();
+   }
+
+   public static DelayedConsentInitializationParameters OneSignal_delayedInitParams() { return OneSignal.delayedInitParams; }
+
+   public static boolean OneSignal_requiresUserPrivacyConsent() { return OneSignal.requiresUserPrivacyConsent; }
+
+   public static String OneSignal_appId() { return OneSignal.appId; }
+
+
+   public static void OneSignal_setAppContext(Context context) { OneSignal.setAppContext(context); }
 }

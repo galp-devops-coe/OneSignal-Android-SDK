@@ -48,7 +48,9 @@ import com.google.android.gms.location.LocationServices;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 class LocationGMS {
    
@@ -61,8 +63,10 @@ class LocationGMS {
       Long timeStamp;
    }
    
-   private static final int TIME_FOREGROUND = 5 * 60, TIME_BACKGROUND = 10 * 60;
-   private static final int FASTEST_UPDATE_TIME_MS = (TIME_FOREGROUND - 30) * 1_000;
+   private static final long TIME_FOREGROUND_SEC = 5 * 60;
+   private static final long TIME_BACKGROUND_SEC = 10 * 60;
+   private static final long FOREGROUND_UPDATE_TIME_MS = (TIME_FOREGROUND_SEC - 30) * 1_000;
+   private static final long BACKGROUND_UPDATE_TIME_MS = (TIME_BACKGROUND_SEC - 30) * 1_000;
    
    private static GoogleApiClientCompatProxy mGoogleApiClient;
    private static Location mLastLocation;
@@ -71,11 +75,17 @@ class LocationGMS {
    
    private static LocationHandlerThread locationHandlerThread;
 
+   protected static final Object syncLock = new Object() {};
+
+   enum CALLBACK_TYPE {
+      STARTUP, PROMPT_LOCATION, SYNC_SERVICE
+   }
    interface LocationHandler {
+      CALLBACK_TYPE getType();
       void complete(LocationPoint point);
    }
 
-   private static LocationHandler locationHandler;
+   private static ConcurrentHashMap<CALLBACK_TYPE, LocationHandler> locationHandlers = new ConcurrentHashMap<>();
 
    private static Thread fallbackFailThread;
 
@@ -86,7 +96,7 @@ class LocationGMS {
          return false;
       
       long lastTime = System.currentTimeMillis() - getLastLocationTime();
-      long minTime = 1_000 * (OneSignal.isForeground() ? TIME_FOREGROUND : TIME_BACKGROUND);
+      long minTime = 1_000 * (OneSignal.isForeground() ? TIME_FOREGROUND_SEC : TIME_BACKGROUND_SEC);
       long scheduleTime = minTime - lastTime;
       
       OneSignalSyncServiceUtils.scheduleLocationUpdateTask(context, scheduleTime);
@@ -99,9 +109,11 @@ class LocationGMS {
    }
    
    private static long getLastLocationTime() {
-      return OneSignalPrefs.getLong(OneSignalPrefs.PREFS_ONESIGNAL,
-              OneSignalPrefs.PREFS_OS_LAST_LOCATION_TIME,
-              TIME_BACKGROUND * -1_000);
+      return OneSignalPrefs.getLong(
+               OneSignalPrefs.PREFS_ONESIGNAL,
+               OneSignalPrefs.PREFS_OS_LAST_LOCATION_TIME,
+               TIME_BACKGROUND_SEC * -1_000
+      );
    }
    
    private static boolean hasLocationPermission(Context context) {
@@ -111,7 +123,7 @@ class LocationGMS {
 
    static void getLocation(Context context, boolean promptLocation, LocationHandler handler) {
       classContext = context;
-      locationHandler = handler;
+      locationHandlers.put(handler.getType(), handler);
    
       if (!OneSignal.shareLocation) {
          fireFailedComplete();
@@ -168,25 +180,27 @@ class LocationGMS {
          return;
 
       try {
-         startFallBackThread();
-         
-         if (locationHandlerThread == null)
-            locationHandlerThread = new LocationHandlerThread();
+         synchronized (syncLock) {
+            startFallBackThread();
 
-         if (mGoogleApiClient == null || mLastLocation == null) {
-            GoogleApiClientListener googleApiClientListener = new GoogleApiClientListener();
-            GoogleApiClient googleApiClient = new GoogleApiClient.Builder(classContext)
-                    .addApi(LocationServices.API)
-                    .addConnectionCallbacks(googleApiClientListener)
-                    .addOnConnectionFailedListener(googleApiClientListener)
-                    .setHandler(locationHandlerThread.mHandler)
-                    .build();
-            mGoogleApiClient = new GoogleApiClientCompatProxy(googleApiClient);
+            if (locationHandlerThread == null)
+               locationHandlerThread = new LocationHandlerThread();
 
-            mGoogleApiClient.connect();
+            if (mGoogleApiClient == null || mLastLocation == null) {
+               GoogleApiClientListener googleApiClientListener = new GoogleApiClientListener();
+               GoogleApiClient googleApiClient = new GoogleApiClient.Builder(classContext)
+                       .addApi(LocationServices.API)
+                       .addConnectionCallbacks(googleApiClientListener)
+                       .addOnConnectionFailedListener(googleApiClientListener)
+                       .setHandler(locationHandlerThread.mHandler)
+                       .build();
+               mGoogleApiClient = new GoogleApiClientCompatProxy(googleApiClient);
+
+               mGoogleApiClient.connect();
+            }
+            else if (mLastLocation != null)
+               fireCompleteForLocation(mLastLocation);
          }
-         else if (mLastLocation != null)
-            fireCompleteForLocation(mLastLocation);
       } catch (Throwable t) {
          OneSignal.Log(OneSignal.LOG_LEVEL.WARN, "Location permission exists but there was an error initializing: ", t);
          fireFailedComplete();
@@ -215,24 +229,29 @@ class LocationGMS {
 
    static void fireFailedComplete() {
       PermissionsActivity.answered = false;
-      if(mGoogleApiClient != null)
-         mGoogleApiClient.disconnect();
-      mGoogleApiClient = null;
+
+      synchronized (syncLock) {
+         if(mGoogleApiClient != null)
+            mGoogleApiClient.disconnect();
+         mGoogleApiClient = null;
+      }
 
       fireComplete(null);
    }
 
    private static void fireComplete(LocationPoint point) {
       // create local copies of fields in thread-safe way
-      LocationHandler _locationHandler;
+      HashMap<CALLBACK_TYPE, LocationHandler> _locationHandlers = new HashMap<>();
       Thread _fallbackFailThread;
       synchronized (LocationGMS.class) {
-         _locationHandler = LocationGMS.locationHandler;
+         _locationHandlers.putAll(LocationGMS.locationHandlers);
+         LocationGMS.locationHandlers.clear();
          _fallbackFailThread = LocationGMS.fallbackFailThread;
       }
 
       // execute race-independent logic
-      _locationHandler.complete(point);
+      for(CALLBACK_TYPE type : _locationHandlers.keySet())
+         _locationHandlers.get(type).complete(point);
       if (_fallbackFailThread != null && !Thread.currentThread().equals(_fallbackFailThread))
           _fallbackFailThread.interrupt();
 
@@ -269,22 +288,37 @@ class LocationGMS {
       fireComplete(point);
       scheduleUpdate(classContext);
    }
-   
-   // Hold on to reference incase gms uses weak referencing.
+
+   static void onFocusChange() {
+      synchronized (syncLock) {
+         if (mGoogleApiClient == null || !mGoogleApiClient.realInstance().isConnected())
+            return;
+
+         GoogleApiClient googleApiClient = mGoogleApiClient.realInstance();
+
+         if (locationUpdateListener != null)
+            LocationServices.FusedLocationApi.removeLocationUpdates(googleApiClient, locationUpdateListener);
+
+         locationUpdateListener = new LocationUpdateListener(googleApiClient);
+      }
+   }
+
    static LocationUpdateListener locationUpdateListener;
    
    private static class GoogleApiClientListener implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
       @Override
       public void onConnected(Bundle bundle) {
-         PermissionsActivity.answered = false;
+         synchronized (syncLock) {
+            PermissionsActivity.answered = false;
 
-         if (mLastLocation == null) {
-            mLastLocation = FusedLocationApiWrapper.getLastLocation(mGoogleApiClient.realInstance());
-            if (mLastLocation != null)
-               fireCompleteForLocation(mLastLocation);
+            if (mLastLocation == null) {
+               mLastLocation = FusedLocationApiWrapper.getLastLocation(mGoogleApiClient.realInstance());
+               if (mLastLocation != null)
+                  fireCompleteForLocation(mLastLocation);
+            }
+
+            locationUpdateListener = new LocationUpdateListener(mGoogleApiClient.realInstance());
          }
-
-         locationUpdateListener = new LocationUpdateListener(mGoogleApiClient.realInstance());
       }
 
       @Override
@@ -302,14 +336,20 @@ class LocationGMS {
    static class LocationUpdateListener implements LocationListener {
       
       private GoogleApiClient mGoogleApiClient;
-      
+
+      // this initializer method is already synchronized from LocationGMS with respect to the GoogleApiClient lock
       LocationUpdateListener(GoogleApiClient googleApiClient) {
          mGoogleApiClient = googleApiClient;
 
-         LocationRequest locationRequest = new LocationRequest();
-         locationRequest.setInterval(FASTEST_UPDATE_TIME_MS)
-                        .setFastestInterval(FASTEST_UPDATE_TIME_MS)
-                        .setPriority(LocationRequest.PRIORITY_BALANCED_POWER_ACCURACY);
+         long updateInterval = BACKGROUND_UPDATE_TIME_MS;
+         if (OneSignal.isForeground())
+            updateInterval =  FOREGROUND_UPDATE_TIME_MS;
+
+         LocationRequest locationRequest = LocationRequest.create()
+            .setFastestInterval(updateInterval)
+            .setInterval(updateInterval)
+            .setMaxWaitTime((long)(updateInterval * 1.5))
+            .setPriority(LocationRequest.PRIORITY_BALANCED_POWER_ACCURACY);
    
          FusedLocationApiWrapper.requestLocationUpdates(mGoogleApiClient, locationRequest, this);
       }
@@ -325,8 +365,10 @@ class LocationGMS {
       @SuppressWarnings("MissingPermission")
       static void requestLocationUpdates(GoogleApiClient googleApiClient, LocationRequest locationRequest, LocationListener locationListener) {
          try {
-            if (googleApiClient.isConnected())
-               LocationServices.FusedLocationApi.requestLocationUpdates(googleApiClient, locationRequest, locationListener);
+            synchronized (LocationGMS.syncLock) {
+               if (googleApiClient.isConnected())
+                  LocationServices.FusedLocationApi.requestLocationUpdates(googleApiClient, locationRequest, locationListener);
+            }
          } catch(Throwable t) {
             OneSignal.Log(OneSignal.LOG_LEVEL.WARN, "FusedLocationApi.requestLocationUpdates failed!", t);
          }
@@ -334,14 +376,16 @@ class LocationGMS {
    
       @SuppressWarnings("MissingPermission")
       static Location getLastLocation(GoogleApiClient googleApiClient) {
-         if (googleApiClient.isConnected())
-            return LocationServices.FusedLocationApi.getLastLocation(googleApiClient);
+         synchronized(LocationGMS.syncLock) {
+            if (googleApiClient.isConnected())
+               return LocationServices.FusedLocationApi.getLastLocation(googleApiClient);
+         }
          return null;
       }
    }
    
    private static class LocationHandlerThread extends HandlerThread {
-      Handler mHandler = null;
+      Handler mHandler;
       
       LocationHandlerThread() {
          super("OSH_LocationHandlerThread");
