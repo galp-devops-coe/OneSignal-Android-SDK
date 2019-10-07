@@ -24,13 +24,13 @@ class Global {
     static def POM_NAME = 'OneSignal'
     static def POM_ARTIFACT_ID = 'OneSignal'
     static def POM_PACKAGING = 'aar'
-    static def VERSION_NAME = '3.10.3-OS2'
+    static def VERSION_NAME = '3.11.3'
 
     // Limit upper number (exclusive) to prevent untested versions
     static def versionGroupOverrides = [
         'com.google.android.gms': '[10.2.1, 12.1.0)',
         'com.google.firebase': '[10.2.1, 12.1.0)',
-        'com.android.support': '[28.0.0, 28.0.0)'
+        'com.android.support': '[26.0.0, 27.2.0)'
     ]
 
     static def GROUP_ID = 'com.onesignal'
