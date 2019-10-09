@@ -41,8 +41,8 @@ dependencies {
     // Required for GoogleApiAvailability
     implementation 'com.google.android.gms:play-services-base:12.0.1'
 
-    api 'com.android.support:support-v4:28.0.0'
-    api 'com.android.support:customtabs:28.0.0'
+    api 'com.android.support:support-v4:27.1.1'
+    api 'com.android.support:customtabs:27.1.1'
 
     // Change api to implementation. Need to check however this has any effect in production
     //   projects that pull from maven.
