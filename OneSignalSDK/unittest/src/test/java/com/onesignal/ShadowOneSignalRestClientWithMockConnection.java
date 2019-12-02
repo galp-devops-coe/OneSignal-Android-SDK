@@ -53,7 +53,7 @@ public class ShadowOneSignalRestClientWithMockConnection {
 
    public static HttpURLConnection newHttpURLConnection(String url) throws IOException {
       lastConnection = new MockHttpURLConnection(
-         new URL("https://onesignal.com/api/v1/" + url),
+         new URL("https://api.onesignal.com/api/v1/" + url),
          mockResponse
       );
       return lastConnection;
