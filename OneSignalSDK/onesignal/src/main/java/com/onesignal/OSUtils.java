@@ -423,8 +423,7 @@ class OSUtils {
       }
       intent.addFlags(
                       Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET |
-                      Intent.FLAG_ACTIVITY_MULTIPLE_TASK |
-                      Intent.FLAG_ACTIVITY_NEW_TASK);
+                      Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
       OneSignal.appContext.startActivity(intent);
    }
 
