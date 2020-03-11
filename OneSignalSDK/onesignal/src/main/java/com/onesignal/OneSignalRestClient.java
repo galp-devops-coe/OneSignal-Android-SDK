@@ -155,7 +155,7 @@ class OneSignalRestClient {
             OneSignal.Log(OneSignal.LOG_LEVEL.DEBUG, "OneSignalRestClient: " + method + " SEND JSON: " + strJsonBody);
 
             byte[] sendBytes = strJsonBody.getBytes("UTF-8");
-            con.setFixedLengthStreamingMode(sendBytes.length);
+            //con.setFixedLengthStreamingMode(sendBytes.length);
 
             OutputStream outputStream = con.getOutputStream();
             outputStream.write(sendBytes);
