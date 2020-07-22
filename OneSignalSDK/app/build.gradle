@@ -1,5 +1,5 @@
 plugins {
-    id 'com.onesignal.androidsdk.onesignal-gradle-plugin' version '0.8.1'
+    id 'com.onesignal.androidsdk.onesignal-gradle-plugin' version '0.12.6'
 }
 apply plugin: 'com.onesignal.androidsdk.onesignal-gradle-plugin'
 
@@ -8,15 +8,15 @@ apply plugin: 'com.android.application'
 //apply plugin: com.onesignal.androidsdk.GradleProjectPlugin
 
 android {
-    compileSdkVersion 27
-    buildToolsVersion '27.0.3'
+    compileSdkVersion 28
+    buildToolsVersion '28.0.3'
     defaultConfig {
         applicationId "com.onesignal.example"
         manifestPlaceholders = [onesignal_app_id: "b2f7f966-d8cc-11e4-bed1-df8f05be55ba",
                                 // Project number pulled from dashboard, local value is ignored.
                                 onesignal_google_project_number: "REMOTE"]
-        minSdkVersion 15
-        targetSdkVersion 27
+        minSdkVersion 17
+        targetSdkVersion 28
         versionCode 1
         versionName "1.0"
     }
@@ -39,7 +39,7 @@ repositories {
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
-    implementation 'com.android.support:appcompat-v7:27.1.0'
+    implementation 'com.android.support:appcompat-v7:28.0.0'
 
     // Use for SDK Development
     implementation(project(':onesignal')) {
@@ -52,22 +52,22 @@ dependencies {
     }
 
     // Use snapshot
-    // compile 'com.onesignal:OneSignal:4.0.0-SNAPSHOT'
-    // compile 'com.onesignal:OneSignal:4.0.0-20171206.043726-5'
+//     compile 'com.onesignal:OneSignal:4.0.0-SNAPSHOT'
+//     compile 'com.onesignal:OneSignal:4.0.0-20171206.043726-5'
 
     // Use to run local .aar file
-    // compile(name: 'OneSignal-release', ext: 'aar')
+//     compile(name: 'OneSignal-release', ext: 'aar')
 
     // New Instructions - Use for released SDK
 //     compile 'com.onesignal:OneSignal:[3.8.2, 3.99.99]'
 
     // Old Instructions - Use for released SDK
-    // compile 'com.onesignal:OneSignal:3.+@aar'
+//     compile 'com.onesignal:OneSignal:3.+@aar'
 
-    implementation 'com.google.android.gms:play-services-location:12.0.0'
+    implementation 'com.google.android.gms:play-services-location:16.0.0'
 
     // For Chrome tabs
-    implementation 'com.android.support:customtabs:27.1.0'
+    implementation 'com.android.support:customtabs:28.0.0'
 }
 
 //apply plugin: 'com.google.gms.google-services'

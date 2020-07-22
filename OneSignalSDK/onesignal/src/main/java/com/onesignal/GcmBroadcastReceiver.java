@@ -131,7 +131,7 @@ public class GcmBroadcastReceiver extends WakefulBroadcastReceiver {
       return processedResult;
    }
 
-   private static void startGCMService(Context context, Bundle bundle) {
+   static void startGCMService(Context context, Bundle bundle) {
       // If no remote resources have to be downloaded don't create a job which could add some delay.
       if (!NotificationBundleProcessor.hasRemoteResource(bundle)) {
          BundleCompat taskExtras = setCompatBundleForServer(bundle, BundleCompatFactory.getInstance());
@@ -157,7 +157,7 @@ public class GcmBroadcastReceiver extends WakefulBroadcastReceiver {
    }
 
    /**
-    * This function uses an android.support.v4.app.JobIntentService in order to enqueue the jobs.
+    * This function uses a com.OneSignal.JobIntentService in order to enqueue the jobs.
     * Some devices with Api O and upper can't schedule more than 100 distinct jobs,
     * this will process one notification sequentially like an IntentService.
     */

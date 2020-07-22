@@ -1,5 +1,4 @@
-<manifest
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.onesignal">
 
     <!-- OneSignal SDK has runtime checks Android version. -->
@@ -61,7 +60,23 @@
     <!-- End: ShortcutBadger -->
 
     <application>
+
         <receiver android:name="com.onesignal.NotificationOpenedReceiver" />
+
+        <service
+            android:name="com.onesignal.HmsMessageServiceOneSignal"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.huawei.push.action.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        
+        <activity android:name="com.onesignal.NotificationOpenedActivityHMS"
+                  android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+            </intent-filter>
+        </activity>
 
         <service android:name="com.onesignal.GcmIntentService" />
 

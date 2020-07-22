@@ -41,7 +41,7 @@ public class StaticResetHelper {
       
       classes.add(new ClassState(OneSignalChromeTabAndroidFrame.class, null));
       classes.add(new ClassState(OneSignalDbHelper.class, null));
-      classes.add(new ClassState(LocationGMS.class, null));
+      classes.add(new ClassState(LocationController.class, null));
       classes.add(new ClassState(OSInAppMessageController.class, null));
       classes.add(new ClassState(ActivityLifecycleListener.class, null));
       classes.add(new ClassState(OSDynamicTriggerController.class, new OtherFieldHandler() {
@@ -54,7 +54,9 @@ public class StaticResetHelper {
             return false;
          }
       }));
-      classes.add(new ClassState(OneSignalPackagePrivateHelper.OSInAppMessageController.class, null));
+      classes.add(new ClassState(FocusTimeController.class, null));
+      classes.add(new ClassState(OSSessionManager.class, null));
+      classes.add(new ClassState(MockSessionManager.class, null));
    }
 
    private interface OtherFieldHandler {
@@ -72,7 +74,8 @@ public class StaticResetHelper {
       }
 
       private Object tryClone(Object v) throws Exception {
-         if (v instanceof Cloneable)
+         if (v instanceof Cloneable
+                 && !Modifier.isFinal(v.getClass().getModifiers()))
             return v.getClass().getMethod("clone").invoke(v);
          return v;
       }
@@ -91,12 +94,13 @@ public class StaticResetHelper {
       }
 
       private void restSetStaticFields() throws Exception {
+         // appContext is manually set to null first since so many things depend on it.
+         OneSignal.appContext = null;
          for (Map.Entry<Field, Object> entry : orginalVals.entrySet()) {
             Field field = entry.getKey();
-            Object value = entry.getValue();
-            field.getName();
             field.setAccessible(true);
 
+            Object value = entry.getValue();
             if (otherFieldHandler == null || !otherFieldHandler.onOtherField(field))
                field.set(null, tryClone(value));
          }

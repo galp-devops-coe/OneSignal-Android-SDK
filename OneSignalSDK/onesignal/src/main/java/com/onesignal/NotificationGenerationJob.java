@@ -30,6 +30,7 @@ package com.onesignal;
 
 import android.content.Context;
 import android.net.Uri;
+import android.support.annotation.Nullable;
 
 import org.json.JSONObject;
 
@@ -86,6 +87,18 @@ class NotificationGenerationJob {
       return overrideSettings.androidNotificationId;
    }
 
+   /**
+    * If notificationId is -1 then the notification is a silent one
+    */
+   boolean isNotificationToDisplay() {
+      return getAndroidIdWithoutCreate() != -1;
+   }
+
+   @Nullable
+   String getApiNotificationId() {
+      return OSNotificationFormatHelper.getOSNotificationIdFromJson(jsonPayload);
+   }
+
    void setAndroidIdWithOutOverriding(Integer id) {
       if (id == null)
          return;
@@ -101,4 +114,5 @@ class NotificationGenerationJob {
    boolean hasExtender() {
       return overrideSettings != null && overrideSettings.extender != null;
    }
+
 }
