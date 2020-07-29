@@ -4,29 +4,24 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.support.annotation.Nullable;
 
-import com.onesignal.BuildConfig;
 import com.onesignal.InAppMessagingHelpers;
 import com.onesignal.OSInAppMessageAction;
-import com.onesignal.OneSignalPackagePrivateHelper.OSInAppMessageController;
 import com.onesignal.OneSignal;
-import com.onesignal.ShadowAdvertisingIdProviderGPS;
-import com.onesignal.ShadowCustomTabsClient;
-import com.onesignal.ShadowCustomTabsSession;
-import com.onesignal.ShadowJobService;
-import com.onesignal.ShadowNotificationManagerCompat;
-import com.onesignal.ShadowOSInAppMessageController;
-import com.onesignal.ShadowOSUtils;
-import com.onesignal.ShadowOneSignalRestClient;
-import com.onesignal.ShadowPushRegistratorGCM;
-import com.onesignal.ShadowDynamicTimer;
-import com.onesignal.StaticResetHelper;
-import com.onesignal.example.BlankActivity;
+import com.onesignal.OneSignalPackagePrivateHelper;
 import com.onesignal.OneSignalPackagePrivateHelper.OSTestInAppMessage;
 import com.onesignal.OneSignalPackagePrivateHelper.OSTestInAppMessageAction;
 import com.onesignal.OneSignalPackagePrivateHelper.OSTestTrigger;
-
-import static com.onesignal.OneSignalPackagePrivateHelper.OSTestTrigger.OSTriggerKind;
-import static com.onesignal.OneSignalPackagePrivateHelper.OSTestTrigger.OSTriggerOperator;
+import com.onesignal.ShadowAdvertisingIdProviderGPS;
+import com.onesignal.ShadowCustomTabsClient;
+import com.onesignal.ShadowCustomTabsSession;
+import com.onesignal.ShadowDynamicTimer;
+import com.onesignal.ShadowJobService;
+import com.onesignal.ShadowNotificationManagerCompat;
+import com.onesignal.ShadowOSUtils;
+import com.onesignal.ShadowOneSignalRestClient;
+import com.onesignal.ShadowPushRegistratorGCM;
+import com.onesignal.StaticResetHelper;
+import com.onesignal.example.BlankActivity;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -38,41 +33,50 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowLog;
-import org.robolectric.android.controller.ActivityController;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.UUID;
 
+import static com.onesignal.OneSignalPackagePrivateHelper.OSTestTrigger.OSTriggerKind;
+import static com.onesignal.OneSignalPackagePrivateHelper.OSTestTrigger.OSTriggerOperator;
+import static com.test.onesignal.TestHelpers.advanceSystemTimeBy;
 import static com.test.onesignal.TestHelpers.assertMainThread;
 import static com.test.onesignal.TestHelpers.threadAndTaskWait;
-import static junit.framework.Assert.*;
+import static junit.framework.Assert.assertEquals;
+import static junit.framework.Assert.assertFalse;
+import static junit.framework.Assert.assertNotNull;
+import static junit.framework.Assert.assertNull;
+import static junit.framework.Assert.assertTrue;
 
-@Config(
-   packageName = "com.onesignal.example",
-    shadows = {
-        ShadowOneSignalRestClient.class,
-        ShadowPushRegistratorGCM.class,
-        ShadowOSUtils.class,
-        ShadowAdvertisingIdProviderGPS.class,
-        ShadowCustomTabsClient.class,
-        ShadowCustomTabsSession.class,
-        ShadowNotificationManagerCompat.class,
-        ShadowJobService.class,
-        ShadowDynamicTimer.class,
-        ShadowOSInAppMessageController.class
-    },
-    instrumentedPackages = { "com.onesignal" },
-    constants = BuildConfig.class,
-    sdk = 26
+@Config(packageName = "com.onesignal.example",
+        instrumentedPackages = { "com.onesignal" },
+        shadows = {
+            ShadowOneSignalRestClient.class,
+            ShadowPushRegistratorGCM.class,
+            ShadowOSUtils.class,
+            ShadowAdvertisingIdProviderGPS.class,
+            ShadowCustomTabsClient.class,
+            ShadowCustomTabsSession.class,
+            ShadowNotificationManagerCompat.class,
+            ShadowJobService.class,
+            ShadowDynamicTimer.class,
+        },
+        sdk = 26
 )
+
 @RunWith(RobolectricTestRunner.class)
 public class InAppMessagingUnitTests {
 
+    private static final String IAM_CLICK_ID = "button_id_123";
     private static final double REQUIRED_TIMER_ACCURACY = 1.25;
-    private static OSTestInAppMessage message;
+    private static final int LIMIT = 5;
+    private static final long DELAY = 60;
 
+    private static OSTestInAppMessage message;
 
     @SuppressLint("StaticFieldLeak")
     private static Activity blankActivity;
@@ -149,6 +153,97 @@ public class InAppMessagingUnitTests {
     public void testBuiltMessageVariants() {
         assertEquals(message.variants.get("android").get("es"), InAppMessagingHelpers.TEST_SPANISH_ANDROID_VARIANT_ID);
         assertEquals(message.variants.get("android").get("en"), InAppMessagingHelpers.TEST_ENGLISH_ANDROID_VARIANT_ID);
+    }
+
+    @Test
+    public void testBuiltMessageReDisplay() throws JSONException {
+        OSTestInAppMessage message = InAppMessagingHelpers.buildTestMessageWitRedisplay(
+                LIMIT,
+                DELAY
+        );
+        assertTrue(message.getRedisplayStats().isRedisplayEnabled());
+        assertEquals(LIMIT, message.getRedisplayStats().getDisplayLimit());
+        assertEquals(DELAY, message.getRedisplayStats().getDisplayDelay());
+        assertEquals(-1, message.getRedisplayStats().getLastDisplayTime());
+        assertEquals(0, message.getRedisplayStats().getDisplayQuantity());
+
+        OSTestInAppMessage messageWithoutDisplay = InAppMessagingHelpers.buildTestMessageWithSingleTrigger(
+                OSTriggerKind.SESSION_TIME,
+                null,
+                OSTriggerOperator.GREATER_THAN_OR_EQUAL_TO.toString(),
+                3
+        );
+        assertFalse(messageWithoutDisplay.getRedisplayStats().isRedisplayEnabled());
+        assertEquals(1, messageWithoutDisplay.getRedisplayStats().getDisplayLimit());
+        assertEquals(0, messageWithoutDisplay.getRedisplayStats().getDisplayDelay());
+        assertEquals(-1, messageWithoutDisplay.getRedisplayStats().getLastDisplayTime());
+        assertEquals(0, messageWithoutDisplay.getRedisplayStats().getDisplayQuantity());
+    }
+
+    @Test
+    public void testBuiltMessageRedisplayLimit() throws JSONException {
+        OSTestInAppMessage message = InAppMessagingHelpers.buildTestMessageWitRedisplay(
+                LIMIT,
+                DELAY
+        );
+
+        for (int i = 0; i < LIMIT; i++) {
+            assertTrue(message.getRedisplayStats().shouldDisplayAgain());
+            message.getRedisplayStats().incrementDisplayQuantity();
+        }
+
+        message.getRedisplayStats().incrementDisplayQuantity();
+        assertFalse(message.getRedisplayStats().shouldDisplayAgain());
+    }
+
+    @Test
+    public void testBuiltMessageRedisplayDelay() throws JSONException {
+        OSTestInAppMessage message = InAppMessagingHelpers.buildTestMessageWitRedisplay(
+                LIMIT,
+                DELAY
+        );
+
+        assertTrue(message.getRedisplayStats().isDelayTimeSatisfied());
+
+        message.getRedisplayStats().setLastDisplayTimeToCurrent();
+        advanceSystemTimeBy(DELAY);
+        assertTrue(message.getRedisplayStats().isDelayTimeSatisfied());
+
+        message.getRedisplayStats().setLastDisplayTimeToCurrent();
+        advanceSystemTimeBy(DELAY - 1);
+        assertFalse(message.getRedisplayStats().isDelayTimeSatisfied());
+    }
+
+    @Test
+    public void testBuiltMessageRedisplayCLickId() throws JSONException {
+        OSTestInAppMessage message = InAppMessagingHelpers.buildTestMessageWitRedisplay(
+                LIMIT,
+                DELAY
+        );
+
+        assertTrue(message.getClickedClickIds().isEmpty());
+        assertTrue(message.isClickAvailable(IAM_CLICK_ID));
+
+        message.addClickId(IAM_CLICK_ID);
+        message.clearClickIds();
+
+        assertTrue(message.getClickedClickIds().isEmpty());
+
+        message.addClickId(IAM_CLICK_ID);
+        message.addClickId(IAM_CLICK_ID);
+        assertEquals(1, message.getClickedClickIds().size());
+
+        assertFalse(message.isClickAvailable(IAM_CLICK_ID));
+
+        OSTestInAppMessage messageWithoutDisplay = InAppMessagingHelpers.buildTestMessageWithSingleTrigger(
+                OSTriggerKind.SESSION_TIME,
+                null,
+                OSTriggerOperator.GREATER_THAN_OR_EQUAL_TO.toString(),
+                3
+        );
+
+        messageWithoutDisplay.addClickId(IAM_CLICK_ID);
+        assertFalse(messageWithoutDisplay.isClickAvailable(IAM_CLICK_ID));
     }
 
     @Test
@@ -466,7 +561,7 @@ public class InAppMessagingUnitTests {
         });
         threadAndTaskWait();
 
-        OSInAppMessageController.getController().onMessageActionOccurredOnMessage(message,
+        OneSignalPackagePrivateHelper.onMessageActionOccurredOnMessage(message,
            new JSONObject() {{
                 put("id", "button_id_123");
                 put("name", "my_click_name");
@@ -491,7 +586,7 @@ public class InAppMessagingUnitTests {
     public void testOnMessageWasShown() throws Exception {
         threadAndTaskWait();
 
-        OSInAppMessageController.getController().onMessageWasShown(message);
+        OneSignalPackagePrivateHelper.onMessageWasShown(message);
 
         ShadowOneSignalRestClient.Request iamImpressionRequest = ShadowOneSignalRestClient.requests.get(2);
 

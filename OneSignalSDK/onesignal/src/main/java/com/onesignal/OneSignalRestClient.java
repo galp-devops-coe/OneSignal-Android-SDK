@@ -49,8 +49,10 @@ class OneSignalRestClient {
 
    static final String CACHE_KEY_GET_TAGS = "CACHE_KEY_GET_TAGS";
    static final String CACHE_KEY_REMOTE_PARAMS = "CACHE_KEY_REMOTE_PARAMS";
-   
-   private static final String BASE_URL = "https://onesignal.com/api/v1/";
+
+   private static final String OS_API_VERSION = "1";
+   private static final String OS_ACCEPT_HEADER = "application/vnd.onesignal.v" + OS_API_VERSION + "+json";
+   private static final String BASE_URL = "https://api.onesignal.com/";
    
    private static final int THREAD_ID = 10000;
    private static final int TIMEOUT = 120_000;
@@ -66,7 +68,7 @@ class OneSignalRestClient {
          public void run() {
             makeRequest(url, "PUT", jsonBody, responseHandler, TIMEOUT, null);
          }
-      }).start();
+      }, "OS_REST_ASYNC_PUT").start();
    }
 
    public static void post(final String url, final JSONObject jsonBody, final ResponseHandler responseHandler) {
@@ -74,7 +76,7 @@ class OneSignalRestClient {
          public void run() {
             makeRequest(url, "POST", jsonBody, responseHandler, TIMEOUT, null);
          }
-      }).start();
+      }, "OS_REST_ASYNC_POST").start();
    }
 
    public static void get(final String url, final ResponseHandler responseHandler, @NonNull final String cacheKey) {
@@ -82,7 +84,7 @@ class OneSignalRestClient {
          public void run() {
             makeRequest(url, null, null, responseHandler, GET_TIMEOUT, cacheKey);
          }
-      }).start();
+      }, "OS_REST_ASYNC_GET").start();
    }
 
    public static void getSync(final String url, final ResponseHandler responseHandler, @NonNull String cacheKey) {
@@ -113,6 +115,7 @@ class OneSignalRestClient {
       
       // getResponseCode() can hang past it's timeout setting so join it's thread to ensure it is timing out.
       try {
+         // Sequentially wait for connectionThread to execute
          connectionThread.join(getThreadTimeout(timeout));
          if (connectionThread.getState() != Thread.State.TERMINATED)
             connectionThread.interrupt();
@@ -140,6 +143,7 @@ class OneSignalRestClient {
          con.setConnectTimeout(timeout);
          con.setReadTimeout(timeout);
          con.setRequestProperty("SDK-Version", "onesignal/android/" + OneSignal.VERSION);
+         con.setRequestProperty("Accept", OS_ACCEPT_HEADER);
 
          if (jsonBody != null)
             con.setDoInput(true);
@@ -188,6 +192,7 @@ class OneSignalRestClient {
                OneSignal.Log(OneSignal.LOG_LEVEL.DEBUG, "OneSignalRestClient: " + (method == null ? "GET" : method) + " - Using Cached response due to 304: " + cachedResponse);
                callbackThread = callResponseHandlerOnSuccess(responseHandler, cachedResponse);
             break;
+            case HttpURLConnection.HTTP_ACCEPTED:
             case HttpURLConnection.HTTP_OK: // 200
                OneSignal.Log(OneSignal.LOG_LEVEL.DEBUG, "OneSignalRestClient: Successfully finished request to: " + BASE_URL + url);
 
@@ -222,16 +227,17 @@ class OneSignalRestClient {
                if (inputStream == null)
                   inputStream = con.getInputStream();
 
+               String jsonResponse = null;
                if (inputStream != null) {
                   scanner = new Scanner(inputStream, "UTF-8");
-                  json = scanner.useDelimiter("\\A").hasNext() ? scanner.next() : "";
+                  jsonResponse = scanner.useDelimiter("\\A").hasNext() ? scanner.next() : "";
                   scanner.close();
-                  OneSignal.Log(OneSignal.LOG_LEVEL.WARN, "OneSignalRestClient: " + method + " RECEIVED JSON: " + json);
+                  OneSignal.Log(OneSignal.LOG_LEVEL.WARN, "OneSignalRestClient: " + method + " RECEIVED JSON: " + jsonResponse);
                }
                else
                   OneSignal.Log(OneSignal.LOG_LEVEL.WARN, "OneSignalRestClient: " + method + " HTTP Code: " + httpResponse + " No response body!");
 
-               callbackThread = callResponseHandlerOnFailure(responseHandler, httpResponse, null, null);
+               callbackThread = callResponseHandlerOnFailure(responseHandler, httpResponse, jsonResponse, null);
          }
       } catch (Throwable t) {
          if (t instanceof java.net.ConnectException || t instanceof java.net.UnknownHostException)
@@ -260,7 +266,7 @@ class OneSignalRestClient {
          public void run() {
             handler.onSuccess(response);
          }
-      });
+      }, "OS_REST_SUCCESS_CALLBACK");
       thread.start();
       
       return thread;
@@ -274,7 +280,7 @@ class OneSignalRestClient {
          public void run() {
             handler.onFailure(statusCode, response, throwable);
          }
-      });
+      }, "OS_REST_FAILURE_CALLBACK");
       thread.start();
       
       return thread;

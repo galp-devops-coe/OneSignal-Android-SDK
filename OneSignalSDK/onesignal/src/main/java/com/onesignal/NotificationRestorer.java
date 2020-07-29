@@ -29,7 +29,6 @@ package com.onesignal;
 
 import android.app.AlarmManager;
 import android.app.PendingIntent;
-import android.app.NotificationManager;
 import android.app.job.JobInfo;
 import android.app.job.JobScheduler;
 import android.content.ComponentName;
@@ -122,33 +121,11 @@ class NotificationRestorer {
       OneSignal.Log(OneSignal.LOG_LEVEL.INFO, "Restoring notifications");
 
       OneSignalDbHelper dbHelper = OneSignalDbHelper.getInstance(context);
-      deleteOldNotificationsFromDb(dbHelper);
 
       StringBuilder dbQuerySelection = OneSignalDbHelper.recentUninteractedWithNotificationsWhere();
       skipVisibleNotifications(context, dbQuerySelection);
 
       queryAndRestoreNotificationsAndBadgeCount(context, dbHelper, dbQuerySelection);
-   }
-
-   private static void deleteOldNotificationsFromDb(OneSignalDbHelper dbHelper) {
-      SQLiteDatabase writableDb = null;
-
-      try {
-         writableDb = dbHelper.getWritableDbWithRetries();
-         writableDb.beginTransaction();
-         NotificationBundleProcessor.deleteOldNotifications(writableDb);
-         writableDb.setTransactionSuccessful();
-      } catch (Throwable t) {
-         OneSignal.Log(OneSignal.LOG_LEVEL.ERROR, "Error deleting old notification records! ", t);
-      } finally {
-         if (writableDb != null) {
-            try {
-               writableDb.endTransaction(); // May throw if transaction was never opened or DB is full.
-            } catch (Throwable t) {
-               OneSignal.Log(OneSignal.LOG_LEVEL.ERROR, "Error closing transaction! ", t);
-            }
-         }
-      }
    }
 
    private static void queryAndRestoreNotificationsAndBadgeCount(
@@ -160,7 +137,7 @@ class NotificationRestorer {
 
       Cursor cursor = null;
       try {
-         SQLiteDatabase readableDb = dbHelper.getReadableDbWithRetries();
+         SQLiteDatabase readableDb = dbHelper.getSQLiteDatabaseWithRetries();
          cursor = readableDb.query(
             NotificationTable.TABLE_NAME,
             COLUMNS_FOR_RESTORE,
@@ -252,8 +229,7 @@ class NotificationRestorer {
 
    private static final int RESTORE_NOTIFICATIONS_DELAY_MS = 15_000;
    static void startDelayedRestoreTaskFromReceiver(Context context) {
-      if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-         // NotificationRestorer#restore is Code-sensitive to Android O
+      if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
          OneSignal.Log(OneSignal.LOG_LEVEL.INFO, "scheduleRestoreKickoffJob");
 
          // set the job id to android notif id - that way we don't restore any notif twice
@@ -273,8 +249,11 @@ class NotificationRestorer {
          intentForService.setComponent(new ComponentName(context.getPackageName(),
                  NotificationRestoreService.class.getName()));
 
+         // KEEP - PendingIntent.FLAG_UPDATE_CURRENT
+         //        Some Samsung devices will throw the below exception otherwise.
+         //        "java.lang.SecurityException: !@Too many alarms (500) registered"
          PendingIntent pendingIntent = PendingIntent.getService(context,
-                 RESTORE_KICKOFF_REQUEST_CODE, intentForService, PendingIntent.FLAG_CANCEL_CURRENT);
+                 RESTORE_KICKOFF_REQUEST_CODE, intentForService, PendingIntent.FLAG_UPDATE_CURRENT);
 
          long scheduleTime = System.currentTimeMillis() + RESTORE_NOTIFICATIONS_DELAY_MS;
          AlarmManager alarm = (AlarmManager)context.getSystemService(Context.ALARM_SERVICE);

@@ -28,6 +28,9 @@
 package com.onesignal;
 
 
+import android.support.annotation.Nullable;
+
+import org.json.JSONException;
 import org.json.JSONObject;
 
 public class OSSubscriptionState implements Cloneable {
@@ -64,8 +67,13 @@ public class OSSubscriptionState implements Cloneable {
       setAccepted(state.getEnabled());
    }
    
-   void setUserId(String id) {
-      boolean changed = !id.equals(userId);
+   void setUserId(@Nullable String id) {
+      boolean changed = false;
+      if (id == null)
+         changed = userId != null;
+      else if (!id.equals(userId))
+         changed = true;
+
       userId = id;
       if (changed)
          observable.notifyChange(this);
@@ -132,8 +140,9 @@ public class OSSubscriptionState implements Cloneable {
    protected Object clone() {
       try {
          return super.clone();
-      } catch (Throwable t) {}
-      return null;
+      } catch (CloneNotSupportedException e) {
+         return null;
+      }
    }
    
    public JSONObject toJSONObject() {
@@ -153,8 +162,8 @@ public class OSSubscriptionState implements Cloneable {
          mainObj.put("userSubscriptionSetting", userSubscriptionSetting);
          mainObj.put("subscribed", getSubscribed());
       }
-      catch(Throwable t) {
-         t.printStackTrace();
+      catch(JSONException e) {
+         e.printStackTrace();
       }
       
       return mainObj;

@@ -1,6 +1,9 @@
 package com.onesignal;
 
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.os.Build;
+import android.os.Process;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 
@@ -15,11 +18,12 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 class OSInAppMessageController implements OSDynamicTriggerControllerObserver, OSSystemConditionController.OSSystemConditionObserver {
+
     private static ArrayList<String> PREFERRED_VARIANT_ORDER = new ArrayList<String>() {{
         add("android");
         add("app");
@@ -27,73 +31,108 @@ class OSInAppMessageController implements OSDynamicTriggerControllerObserver, OS
     }};
 
     public static final String IN_APP_MESSAGES_JSON_KEY = "in_app_messages";
+    private static final String OS_SAVE_IN_APP_MESSAGE = "OS_SAVE_IN_APP_MESSAGE";
 
     OSTriggerController triggerController;
     private OSSystemConditionController systemConditionController;
+    private OSInAppMessageRepository inAppMessageRepository;
 
     // IAMs loaded remotely from on_session
     //   If on_session won't be called this will be loaded from cache
-    @NonNull private ArrayList<OSInAppMessage> messages;
-    // IAMs that have had their trigger(s) evaluated to true;
-    //   This mean they have been added to the queue to display, or have already displayed
-    @NonNull final private Set<String> triggeredMessages;
+    @NonNull
+    private ArrayList<OSInAppMessage> messages;
+    // IAMs that have been dismissed by the user
+    //   This mean they have already displayed to the user
+    @NonNull
+    final private Set<String> dismissedMessages;
     // IAMs that have been displayed to the user
     //   This means their impression has been successfully posted to our backend and should not be counted again
-    @NonNull final private Set<String> impressionedMessages;
+    @NonNull
+    final private Set<String> impressionedMessages;
     // IAM clicks that have been successfully posted to our backend and should not be counted again
-    @NonNull final private Set<String> clickedClickIds;
+    @NonNull
+    final private Set<String> clickedClickIds;
     // Ordered IAMs queued to display, includes the message currently displaying, if any.
-    @NonNull final ArrayList<OSInAppMessage> messageDisplayQueue;
+    @NonNull
+    final private ArrayList<OSInAppMessage> messageDisplayQueue;
+    // IAMs displayed with last displayed time and quantity of displays data
+    // This is retrieved from a DB Table that take care of each object to be unique
+    @NonNull
+    private List<OSInAppMessage> redisplayedInAppMessages;
 
+    private OSInAppMessagePrompt currentPrompt = null;
     private boolean inAppMessagingEnabled = true;
+    private boolean inAppMessageShowing = false;
 
-    @Nullable Date lastTimeInAppDismissed;
+    @Nullable
+    Date lastTimeInAppDismissed;
+    private int htmlNetworkRequestAttemptCount = 0;
 
-    @Nullable private static OSInAppMessageController sharedInstance;
-    public static OSInAppMessageController getController() {
+    @Nullable
+    private static OSInAppMessageController sharedInstance;
+
+    public static synchronized OSInAppMessageController getController() {
+        OneSignalDbHelper dbHelper = OneSignal.getDBHelperInstance();
+
         // Make sure only Android 4.4 devices and higher can use IAMs
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN_MR2) {
-            sharedInstance = new OSInAppMessageDummyController();
+            sharedInstance = new OSInAppMessageDummyController(null);
         }
 
         if (sharedInstance == null)
-            sharedInstance = new OSInAppMessageController();
+            sharedInstance = new OSInAppMessageController(dbHelper);
 
         return sharedInstance;
     }
 
-    protected OSInAppMessageController() {
+    protected OSInAppMessageController(OneSignalDbHelper dbHelper) {
         messages = new ArrayList<>();
-        triggeredMessages = OSUtils.newConcurrentSet();
+        dismissedMessages = OSUtils.newConcurrentSet();
+        messageDisplayQueue = new ArrayList<>();
         impressionedMessages = OSUtils.newConcurrentSet();
         clickedClickIds = OSUtils.newConcurrentSet();
-        messageDisplayQueue = new ArrayList<>();
         triggerController = new OSTriggerController(this);
         systemConditionController = new OSSystemConditionController(this);
 
-        Set<String> tempTriggeredSet = OneSignalPrefs.getStringSet(
+        Set<String> tempDismissedSet = OneSignalPrefs.getStringSet(
                 OneSignalPrefs.PREFS_ONESIGNAL,
-                OneSignalPrefs.PREFS_OS_DISPLAYED_IAMS,
+                OneSignalPrefs.PREFS_OS_DISMISSED_IAMS,
                 null
         );
-        if (tempTriggeredSet != null)
-            triggeredMessages.addAll(tempTriggeredSet);
+        if (tempDismissedSet != null)
+            dismissedMessages.addAll(tempDismissedSet);
 
-        Set<String> tempImpressionedSet = OneSignalPrefs.getStringSet(
+        Set<String> tempImpressionsSet = OneSignalPrefs.getStringSet(
                 OneSignalPrefs.PREFS_ONESIGNAL,
                 OneSignalPrefs.PREFS_OS_IMPRESSIONED_IAMS,
                 null
         );
-        if (tempImpressionedSet != null)
-            impressionedMessages.addAll(tempImpressionedSet);
+        if (tempImpressionsSet != null)
+            impressionedMessages.addAll(tempImpressionsSet);
 
         Set<String> tempClickedMessageIdsSet = OneSignalPrefs.getStringSet(
-           OneSignalPrefs.PREFS_ONESIGNAL,
-           OneSignalPrefs.PREFS_OS_CLICKED_CLICK_IDS_IAMS,
-           null
+                OneSignalPrefs.PREFS_ONESIGNAL,
+                OneSignalPrefs.PREFS_OS_CLICKED_CLICK_IDS_IAMS,
+                null
         );
         if (tempClickedMessageIdsSet != null)
             clickedClickIds.addAll(tempClickedMessageIdsSet);
+
+        initRedisplayData(dbHelper);
+    }
+
+    OSInAppMessageRepository getInAppMessageRepository(OneSignalDbHelper dbHelper) {
+        if (inAppMessageRepository == null)
+            inAppMessageRepository = new OSInAppMessageRepository(dbHelper);
+
+        return inAppMessageRepository;
+    }
+
+    protected void initRedisplayData(OneSignalDbHelper dbHelper) {
+        inAppMessageRepository = getInAppMessageRepository(dbHelper);
+        redisplayedInAppMessages = inAppMessageRepository.getCachedInAppMessages();
+
+        OneSignal.Log(OneSignal.LOG_LEVEL.DEBUG, "redisplayedInAppMessages: " + redisplayedInAppMessages.toString());
     }
 
     // Normally we wait until on_session call to download the latest IAMs
@@ -104,9 +143,9 @@ class OSInAppMessageController implements OSDynamicTriggerControllerObserver, OS
             return;
 
         String cachedIamsStr = OneSignalPrefs.getString(
-           OneSignalPrefs.PREFS_ONESIGNAL,
-           OneSignalPrefs.PREFS_OS_CACHED_IAMS,
-           null
+                OneSignalPrefs.PREFS_ONESIGNAL,
+                OneSignalPrefs.PREFS_OS_CACHED_IAMS,
+                null
         );
         OneSignal.Log(OneSignal.LOG_LEVEL.DEBUG, "initWithCachedInAppMessages: " + cachedIamsStr);
 
@@ -120,13 +159,25 @@ class OSInAppMessageController implements OSDynamicTriggerControllerObserver, OS
         }
     }
 
-    // Called after the device is registered from UserStateSynchronizer
-    //    which is the REST call to create the player record on_session
+    /**
+     * Called after the device is registered from UserStateSynchronizer
+     * which is the REST call to create the player record on_session
+     */
     void receivedInAppMessageJson(@NonNull JSONArray json) throws JSONException {
         // Cache copy for quick cold starts
-        OneSignalPrefs.saveString(OneSignalPrefs.PREFS_ONESIGNAL,
-           OneSignalPrefs.PREFS_OS_CACHED_IAMS, json.toString());
+        OneSignalPrefs.saveString(
+                OneSignalPrefs.PREFS_ONESIGNAL,
+                OneSignalPrefs.PREFS_OS_CACHED_IAMS,
+                json.toString());
+
+        resetRedisplayMessagesBySession();
         processInAppMessageJson(json);
+    }
+
+    private void resetRedisplayMessagesBySession() {
+        for (OSInAppMessage redisplayInAppMessage : redisplayedInAppMessages) {
+            redisplayInAppMessage.setDisplayedInSession(false);
+        }
     }
 
     private void processInAppMessageJson(@NonNull JSONArray json) throws JSONException {
@@ -142,15 +193,15 @@ class OSInAppMessageController implements OSDynamicTriggerControllerObserver, OS
     }
 
     private void evaluateInAppMessages() {
-        if (systemConditionController.systemConditionsAvailable()) {
-            for (OSInAppMessage message : messages) {
-                if (triggerController.evaluateMessageTriggers(message))
-                    messageCanBeDisplayed(message);
-            }
+        for (OSInAppMessage message : messages) {
+            setDataForRedisplay(message);
+            if (!dismissedMessages.contains(message.messageId) && triggerController.evaluateMessageTriggers(message))
+                queueMessageForDisplay(message);
         }
     }
 
-    private static @Nullable String variantIdForMessage(@NonNull OSInAppMessage message) {
+    private static @Nullable
+    String variantIdForMessage(@NonNull OSInAppMessage message) {
         String languageIdentifier = OSUtils.getCorrectedLanguage();
 
         for (String variant : PREFERRED_VARIANT_ORDER) {
@@ -181,6 +232,7 @@ class OSInAppMessageController implements OSDynamicTriggerControllerObserver, OS
         // Check that the messageId is in impressionedMessages so we return early without a second post being made
         if (impressionedMessages.contains(message.messageId))
             return;
+
         // Add the messageId to impressionedMessages so no second request is made
         impressionedMessages.add(message.messageId);
 
@@ -221,29 +273,120 @@ class OSInAppMessageController implements OSDynamicTriggerControllerObserver, OS
         }
     }
 
-    void onMessageActionOccurredOnMessage(@NonNull final OSInAppMessage message, @NonNull final JSONObject actionJson) {
+    void onMessageActionOccurredOnMessage(@NonNull final OSInAppMessage message, @NonNull final JSONObject actionJson) throws JSONException {
         final OSInAppMessageAction action = new OSInAppMessageAction(actionJson);
         action.firstClick = message.takeActionAsUnique();
 
-        firePublicClickHandler(action);
+        firePublicClickHandler(message.messageId, action);
+        beginProcessingPrompts(message, action.prompts);
         fireClickAction(action);
         fireRESTCallForClick(message, action);
+        fireTagCallForClick(action);
+        fireOutcomesForClick(message.messageId, action.outcomes);
     }
 
-    void onMessageActionOccurredOnPreview(@NonNull final OSInAppMessage message, @NonNull final JSONObject actionJson) {
+    void onMessageActionOccurredOnPreview(@NonNull final OSInAppMessage message, @NonNull final JSONObject actionJson) throws JSONException {
         final OSInAppMessageAction action = new OSInAppMessageAction(actionJson);
         action.firstClick = message.takeActionAsUnique();
 
-        firePublicClickHandler(action);
+        firePublicClickHandler(message.messageId, action);
+        beginProcessingPrompts(message, action.prompts);
         fireClickAction(action);
+        logInAppMessagePreviewActions(action);
     }
 
-    private void firePublicClickHandler(@NonNull final OSInAppMessageAction action) {
+    private void logInAppMessagePreviewActions(final OSInAppMessageAction action) {
+        if (action.tags != null)
+            OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "Tags detected inside of the action click payload, ignoring because action came from IAM preview:: " + action.tags.toString());
+
+        if (action.outcomes.size() > 0)
+            OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "Outcomes detected inside of the action click payload, ignoring because action came from IAM preview: " + action.outcomes.toString());
+
+        // TODO: Add more action payload preview logs here in future
+    }
+
+    private void beginProcessingPrompts(OSInAppMessage message, final List<OSInAppMessagePrompt> prompts) {
+        if (prompts.size() > 0) {
+            OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "IAM showing prompts from IAM: " + message.toString());
+            // TODO until we don't fix the activity going forward or back dismissing the IAM, we need to auto dismiss
+            WebViewManager.dismissCurrentInAppMessage();
+            showMultiplePrompts(message, prompts);
+        }
+    }
+
+    private void showMultiplePrompts(final OSInAppMessage inAppMessage, final List<OSInAppMessagePrompt> prompts) {
+        for (OSInAppMessagePrompt prompt : prompts) {
+            // Don't show prompt twice
+            if (!prompt.hasPrompted()) {
+                currentPrompt = prompt;
+                break;
+            }
+        }
+
+        if (currentPrompt != null) {
+            OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "IAM prompt to handle: " + currentPrompt.toString());
+            currentPrompt.setPrompted(true);
+            currentPrompt.handlePrompt(new OneSignal.OSPromptActionCompletionCallback() {
+                @Override
+                public void onCompleted(OneSignal.PromptActionResult result) {
+                    currentPrompt = null;
+                    OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "IAM prompt to handle finished with result: " + result);
+
+                    // On preview mode we show informative alert dialogs
+                    if (inAppMessage.isPreview && result == OneSignal.PromptActionResult.LOCATION_PERMISSIONS_MISSING_MANIFEST)
+                        showAlertDialogMessage(inAppMessage, prompts);
+                    else
+                        showMultiplePrompts(inAppMessage, prompts);
+                }
+            });
+        } else {
+            OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "No IAM prompt to handle, dismiss message: " + inAppMessage.messageId);
+            messageWasDismissed(inAppMessage);
+        }
+    }
+
+    private void showAlertDialogMessage(final OSInAppMessage inAppMessage, final List<OSInAppMessagePrompt> prompts) {
+        final String messageTitle = OneSignal.appContext.getString(R.string.location_not_available_title);
+        final String message = OneSignal.appContext.getString(R.string.location_not_available_message);
+        new AlertDialog.Builder(ActivityLifecycleHandler.curActivity)
+                .setTitle(messageTitle)
+                .setMessage(message)
+                .setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface dialog, int which) {
+                        showMultiplePrompts(inAppMessage, prompts);
+                    }
+                })
+                .show();
+    }
+
+    private void fireOutcomesForClick(String messageId, @NonNull final List<OSInAppMessageOutcome> outcomes) {
+        OneSignal.getSessionManager().onDirectInfluenceFromIAMClick(messageId);
+        OneSignal.sendClickActionOutcomes(outcomes);
+    }
+
+    private void fireTagCallForClick(@NonNull final OSInAppMessageAction action) {
+        if (action.tags != null) {
+            OSInAppMessageTag tags = action.tags;
+
+            if (tags.getTagsToAdd() != null)
+                OneSignal.sendTags(tags.getTagsToAdd());
+            if (tags.getTagsToRemove() != null)
+                OneSignal.deleteTags(tags.getTagsToRemove(), null);
+        }
+    }
+
+    private void firePublicClickHandler(@NonNull final String messageId, @NonNull final OSInAppMessageAction action) {
         if (OneSignal.mInitBuilder.mInAppMessageClickHandler == null)
             return;
+
         OSUtils.runOnMainUIThread(new Runnable() {
             @Override
             public void run() {
+                // Send public outcome from handler
+                // Send public outcome not from handler
+                // Check that only on the handler
+                // Any outcome sent on this callback should count as DIRECT from this IAM
+                OneSignal.getSessionManager().onDirectInfluenceFromIAMClick(messageId);
                 OneSignal.mInitBuilder.mInAppMessageClickHandler.inAppMessageClicked(action);
             }
         });
@@ -263,17 +406,24 @@ class OSInAppMessageController implements OSDynamicTriggerControllerObserver, OS
         if (variantId == null)
             return;
 
-        // Never count multiple clicks for the same click UUID
-        if (clickedClickIds.contains(action.clickId))
+        final String clickId = action.clickId;
+        // If IAM has redisplay the clickId may be available
+        boolean clickAvailableByRedisplay = message.getRedisplayStats().isRedisplayEnabled() && message.isClickAvailable(clickId);
+
+        // Never count multiple clicks for the same click UUID unless that click is from an IAM with redisplay
+        if (!clickAvailableByRedisplay && clickedClickIds.contains(clickId))
             return;
-        clickedClickIds.add(action.clickId);
+
+        clickedClickIds.add(clickId);
+        // Track clickId per IAM
+        message.addClickId(clickId);
 
         try {
             JSONObject json = new JSONObject() {{
-                put("app_id", OneSignal.appId);
+                put("app_id", OneSignal.getSavedAppId());
                 put("device_type", new OSUtils().getDeviceType());
                 put("player_id", OneSignal.getUserId());
-                put("click_id", action.clickId);
+                put("click_id", clickId);
                 put("variant_id", variantId);
                 if (action.firstClick)
                     put("first_click", true);
@@ -283,11 +433,11 @@ class OSInAppMessageController implements OSDynamicTriggerControllerObserver, OS
                 @Override
                 void onSuccess(String response) {
                     printHttpSuccessForInAppMessageRequest("engagement", response);
-                    // Persist success click to disk. Id already added to set before making making the network call
+                    // Persist success click to disk. Id already added to set before making the network call
                     OneSignalPrefs.saveStringSet(
-                       OneSignalPrefs.PREFS_ONESIGNAL,
-                       OneSignalPrefs.PREFS_OS_CLICKED_CLICK_IDS_IAMS,
-                       clickedClickIds
+                            OneSignalPrefs.PREFS_ONESIGNAL,
+                            OneSignalPrefs.PREFS_OS_CLICKED_CLICK_IDS_IAMS,
+                            clickedClickIds
                     );
                 }
 
@@ -303,92 +453,177 @@ class OSInAppMessageController implements OSDynamicTriggerControllerObserver, OS
         }
     }
 
-    private void messageCanBeDisplayed(@NonNull OSInAppMessage message) {
-        if (!inAppMessagingEnabled)
-            return;
+    /**
+     * Part of redisplay logic
+     * <p>
+     * In order to redisplay an IAM, the following conditions must be satisfied:
+     * 1. IAM has redisplay property
+     * 2. Time delay between redisplay satisfied
+     * 3. Has more redisplays
+     * 4. An IAM trigger was satisfied
+     * <p>
+     * For redisplay, the message need to be removed from the arrays that track the display/impression
+     * For click counting, every message has it click id array
+     */
+    private void setDataForRedisplay(OSInAppMessage message) {
+        boolean messageDismissed = dismissedMessages.contains(message.messageId);
+        int index = redisplayedInAppMessages.indexOf(message);
 
-        if (triggeredMessages.contains(message.messageId) &&
-            !message.isPreview) {
-            OneSignal.Log(
-               OneSignal.LOG_LEVEL.ERROR,
-               "In-App message with id '" +
-                  message.messageId +
-                  "' already displayed or is already preparing to be display!");
-            return;
+        if (messageDismissed && index != -1) {
+            OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "setDataForRedisplay: " + message.messageId);
+
+            OSInAppMessage savedIAM = redisplayedInAppMessages.get(index);
+            message.getRedisplayStats().setDisplayStats(savedIAM.getRedisplayStats());
+
+            // Message that don't have triggers should display only once per session
+            boolean triggerHasChanged = message.isTriggerChanged() || (!savedIAM.isDisplayedInSession() && message.triggers.isEmpty());
+            // Check if conditions are correct for redisplay
+            if (triggerHasChanged &&
+                    message.getRedisplayStats().isDelayTimeSatisfied() &&
+                    message.getRedisplayStats().shouldDisplayAgain()) {
+                dismissedMessages.remove(message.messageId);
+                impressionedMessages.remove(message.messageId);
+                message.clearClickIds();
+            }
         }
-
-        queueMessageForDisplay(message);
     }
 
-    // Message has passed triggers and de-duplication logic.
-    // Display message now or add it to the queue to be displayed.
+    /**
+     * Message has passed triggers and de-duplication logic.
+     * Display message now or add it to the queue to be displayed.
+     */
     private void queueMessageForDisplay(@NonNull OSInAppMessage message) {
         synchronized (messageDisplayQueue) {
-            messageDisplayQueue.add(message);
-            if (!message.isPreview)
-                triggeredMessages.add(message.messageId);
+            // Make sure no message is ever added to the queue more than once
+            if (!messageDisplayQueue.contains(message)) {
+                messageDisplayQueue.add(message);
+                OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "In app message with id, " + message.messageId + ", added to the queue");
+            }
 
-            OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "queueMessageForDisplay: " + messageDisplayQueue);
+            attemptToShowInAppMessage();
+        }
+    }
 
-            if (messageDisplayQueue.size() > 1) {
-                // means we are already displaying a message
-                // this message will be displayed afterwards
+    private void attemptToShowInAppMessage() {
+        synchronized (messageDisplayQueue) {
+            // We need to wait for system conditions to be the correct ones
+            if (!systemConditionController.systemConditionsAvailable()) {
+                OneSignal.onesignalLog(OneSignal.LOG_LEVEL.WARN, "In app message not showing due to system condition not correct");
                 return;
             }
 
-            displayMessage(message);
+            OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "displayFirstIAMOnQueue: " + messageDisplayQueue);
+            // If there are IAMs in the queue and nothing showing, show first in the queue
+            if (messageDisplayQueue.size() > 0 && !isInAppMessageShowing()) {
+                OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "No IAM showing currently, showing first item in the queue!");
+                displayMessage(messageDisplayQueue.get(0));
+                return;
+            }
+
+            OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "In app message is currently showing or there are no IAMs left in the queue!");
         }
     }
 
-    boolean isDisplayingInApp() {
-        return messageDisplayQueue.size() > 0;
+    boolean isInAppMessageShowing() {
+        return inAppMessageShowing;
     }
 
     @Nullable
     OSInAppMessage getCurrentDisplayedInAppMessage() {
-        return isDisplayingInApp() ? messageDisplayQueue.get(0) : null;
+        // When in app messaging is paused, the messageDisplayQueue might have IAMs, so return null
+        return inAppMessageShowing ? messageDisplayQueue.get(0) : null;
     }
 
-    // Called after an In-App message is closed and it's dismiss animation has completed
+    /**
+     * Called after an In-App message is closed and it's dismiss animation has completed
+     */
     void messageWasDismissed(@NonNull OSInAppMessage message) {
+        messageWasDismissed(message, false);
+    }
+
+    void messageWasDismissed(@NonNull OSInAppMessage message, boolean failed) {
+        // Remove DIRECT influence due to ClickHandler of ClickAction outcomes
+        OneSignal.getSessionManager().onDirectInfluenceFromIAMClickFinished();
+
+        if (!message.isPreview) {
+            dismissedMessages.add(message.messageId);
+            // If failed we will retry on next session
+            if (!failed) {
+                OneSignalPrefs.saveStringSet(
+                        OneSignalPrefs.PREFS_ONESIGNAL,
+                        OneSignalPrefs.PREFS_OS_DISMISSED_IAMS,
+                        dismissedMessages);
+
+                // Don't keep track of last displayed time for a preview
+                lastTimeInAppDismissed = new Date();
+                // Only increase IAM display quantity if IAM was truly displayed
+                persistInAppMessage(message);
+            }
+            OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "OSInAppMessageController messageWasDismissed dismissedMessages: " + dismissedMessages.toString());
+        }
+
+        dismissCurrentMessage(message);
+    }
+
+    /**
+     * Removes first item from the queue and attempts to show the next IAM in the queue
+     *
+     * @param message The message dismissed, preview messages are null
+     */
+    private void dismissCurrentMessage(@Nullable OSInAppMessage message) {
+        if (currentPrompt != null) {
+            OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "Stop evaluateMessageDisplayQueue because prompt is currently displayed");
+            return;
+        }
+
+        inAppMessageShowing = false;
         synchronized (messageDisplayQueue) {
-            if (!messageDisplayQueue.remove(message)) {
-                if (!message.isPreview)
-                    OneSignal.Log(OneSignal.LOG_LEVEL.ERROR, "An in-app message was removed from the display queue before it was finished displaying.");
-                return;
+            if (messageDisplayQueue.size() > 0) {
+                if (message != null && !messageDisplayQueue.contains(message)) {
+                    OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "Message already removed from the queue!");
+                    return;
+                } else {
+                    String removedMessageId = messageDisplayQueue.remove(0).messageId;
+                    OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "In app message with id, " + removedMessageId + ", dismissed (removed) from the queue!");
+                }
             }
 
-            if (!message.isPreview)
-                persistDisplayedIams();
-
-            // Display the next message in the queue, if any
-            if (messageDisplayQueue.size() > 0)
+            // Display the next message in the queue, or attempt to add more IAMs to the queue
+            if (messageDisplayQueue.size() > 0) {
+                OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "In app message on queue available: " + messageDisplayQueue.get(0).messageId);
                 displayMessage(messageDisplayQueue.get(0));
-            else {
-                lastTimeInAppDismissed = new Date();
+            } else {
+                OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "In app message dismissed evaluating messages");
                 evaluateInAppMessages();
             }
         }
     }
 
-    private void persistDisplayedIams() {
-        OneSignalPrefs.saveStringSet(
-           OneSignalPrefs.PREFS_ONESIGNAL,
-           OneSignalPrefs.PREFS_OS_DISPLAYED_IAMS,
-           // Persisting only ones dismissed / opened in case the user didn't have a chance
-           //  to interact with the message.
-           getAllDismissedIams()
-        );
-    }
+    private void persistInAppMessage(final OSInAppMessage message) {
+        long displayTimeSeconds = System.currentTimeMillis() / 1000;
+        message.getRedisplayStats().setLastDisplayTime(displayTimeSeconds);
+        message.getRedisplayStats().incrementDisplayQuantity();
+        message.setTriggerChanged(false);
+        message.setDisplayedInSession(true);
 
-    // Calculate all dismissed as triggeredMessages minus any in the display queue
-    private @NonNull Set<String> getAllDismissedIams() {
-        Set<String> dismissedIams = new HashSet<>(triggeredMessages);
-        synchronized (messageDisplayQueue) {
-            for(OSInAppMessage message : messageDisplayQueue)
-                dismissedIams.remove(message.messageId);
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                Thread.currentThread().setPriority(Process.THREAD_PRIORITY_BACKGROUND);
+                inAppMessageRepository.saveInAppMessage(message);
+            }
+        }, OS_SAVE_IN_APP_MESSAGE).start();
+
+        // Update the data to enable future re displays
+        // Avoid calling the repository data again
+        int index = redisplayedInAppMessages.indexOf(message);
+        if (index != -1) {
+            redisplayedInAppMessages.set(index, message);
+        } else {
+            redisplayedInAppMessages.add(message);
         }
-        return dismissedIams;
+
+        OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "persistInAppMessageForRedisplay: " + message.toString() + " with msg array data: " + redisplayedInAppMessages.toString());
     }
 
     private static @Nullable
@@ -403,16 +638,42 @@ class OSInAppMessageController implements OSDynamicTriggerControllerObserver, OS
         return "in_app_messages/" + message.messageId + "/variants/" + variantId + "/html?app_id=" + OneSignal.appId;
     }
 
-    public void displayMessage(@NonNull final OSInAppMessage message) {
+    private void displayMessage(@NonNull final OSInAppMessage message) {
+        if (!inAppMessagingEnabled) {
+            OneSignal.onesignalLog(OneSignal.LOG_LEVEL.VERBOSE, "In app messaging is currently paused, iam will not be shown!");
+            return;
+        }
+
+        inAppMessageShowing = true;
+
         String htmlPath = htmlPathForMessage(message);
-        OneSignalRestClient.getSync(htmlPath, new ResponseHandler() {
+        OneSignalRestClient.get(htmlPath, new ResponseHandler() {
             @Override
             void onFailure(int statusCode, String response, Throwable throwable) {
+                inAppMessageShowing = false;
+
                 printHttpErrorForInAppMessageRequest("html", statusCode, response);
+
+                if (!OSUtils.shouldRetryNetworkRequest(statusCode) || htmlNetworkRequestAttemptCount >= OSUtils.MAX_NETWORK_REQUEST_ATTEMPT_COUNT) {
+                    // Failure limit reached, reset
+                    htmlNetworkRequestAttemptCount = 0;
+                    messageWasDismissed(message, true);
+                    return;
+                }
+
+                // Failure limit not reached, increment by 1
+                htmlNetworkRequestAttemptCount++;
+                // Retry displaying the same IAM
+                // Using the queueMessageForDisplay method follows safety checks to prevent issues
+                // like having 2 IAMs showing at once or duplicate IAMs in the queue
+                queueMessageForDisplay(message);
             }
 
             @Override
             void onSuccess(String response) {
+                // Successful request, reset count
+                htmlNetworkRequestAttemptCount = 0;
+
                 try {
                     JSONObject jsonResponse = new JSONObject(response);
                     String htmlStr = jsonResponse.getString("html");
@@ -420,6 +681,7 @@ class OSInAppMessageController implements OSDynamicTriggerControllerObserver, OS
                     double displayDuration = jsonResponse.optDouble("display_duration");
                     message.setDisplayDuration(displayDuration);
 
+                    OneSignal.getSessionManager().onInAppMessageReceived(message.messageId);
                     WebViewManager.showHTMLString(message, htmlStr);
                 } catch (JSONException e) {
                     e.printStackTrace();
@@ -429,11 +691,15 @@ class OSInAppMessageController implements OSDynamicTriggerControllerObserver, OS
     }
 
     void displayPreviewMessage(@NonNull String previewUUID) {
+        inAppMessageShowing = true;
+
         String htmlPath = "in_app_messages/device_preview?preview_id=" + previewUUID + "&app_id=" + OneSignal.appId;
         OneSignalRestClient.get(htmlPath, new ResponseHandler() {
             @Override
             void onFailure(int statusCode, String response, Throwable throwable) {
                 printHttpErrorForInAppMessageRequest("html", statusCode, response);
+
+                dismissCurrentMessage(null);
             }
 
             @Override
@@ -458,24 +724,53 @@ class OSInAppMessageController implements OSDynamicTriggerControllerObserver, OS
     @Override
     public void messageTriggerConditionChanged() {
         // This method is called when a time-based trigger timer fires, meaning the message can
-        // probably be shown now. So the current message conditions should be re-evaluated
+        //  probably be shown now. So the current message conditions should be re-evaluated
         evaluateInAppMessages();
+    }
+
+    /**
+     * If this method is called a system condition has changed to success
+     * - Keyboard is down
+     * - No DialogFragment visible
+     * - Activity is on focus, this mean no prompt permissions visible
+     */
+    @Override
+    public void systemConditionChanged() {
+        attemptToShowInAppMessage();
+    }
+
+    /**
+     * Part of redisplay logic
+     * <p>
+     * Make all messages with redisplay available if:
+     * - Already displayed
+     * - At least one Trigger has changed
+     */
+    private void makeRedisplayMessagesAvailableWithTriggers(Collection<String> newTriggersKeys) {
+        for (OSInAppMessage message : messages) {
+            if (redisplayedInAppMessages.contains(message) &&
+                    triggerController.isTriggerOnMessage(message, newTriggersKeys)) {
+                message.setTriggerChanged(true);
+            }
+        }
     }
 
     /**
      * Trigger logic
      * <p>
      * These methods mostly pass data to the Trigger Controller, but also cause the SDK to
-     * re-evaluate messages to see if we should display a message now that the trigger
+     * re-evaluate messages to see if we should display/redisplay a message now that the trigger
      * conditions have changed.
      */
     void addTriggers(Map<String, Object> newTriggers) {
         triggerController.addTriggers(newTriggers);
+        makeRedisplayMessagesAvailableWithTriggers(newTriggers.keySet());
         evaluateInAppMessages();
     }
 
     void removeTriggersForKeys(Collection<String> keys) {
         triggerController.removeTriggersForKeys(keys);
+        makeRedisplayMessagesAvailableWithTriggers(keys);
         evaluateInAppMessages();
     }
 
@@ -488,5 +783,15 @@ class OSInAppMessageController implements OSDynamicTriggerControllerObserver, OS
     @Nullable
     Object getTriggerValue(String key) {
         return triggerController.getTriggerValue(key);
+    }
+
+    @NonNull
+    public ArrayList<OSInAppMessage> getInAppMessageDisplayQueue() {
+        return messageDisplayQueue;
+    }
+
+    @NonNull
+    public List<OSInAppMessage> getRedisplayedInAppMessages() {
+        return redisplayedInAppMessages;
     }
 }

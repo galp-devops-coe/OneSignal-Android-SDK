@@ -35,18 +35,33 @@ import android.os.HandlerThread;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.Set;
 
 class OneSignalPrefs {
+
+    // TODO: Remove this once the tasks below have been finished...
+    //  1. Fix all of the SharedPreference Keys so they are organized by usage with comments
+    //  ex.
+    //   // In-App Messaging
+    //   public static final String PREFS_OS_CACHED_IAMS = "PREFS_OS_CACHED_IAMS";
+    //   public static final String PREFS_OS_DISMISSED_IAMS = "PREFS_OS_DISPLAYED_IAMS";
+    //   public static final String PREFS_OS_IMPRESSIONED_IAMS = "PREFS_OS_IMPRESSIONED_IAMS";
+    //   public static final String PREFS_OS_CLICKED_CLICK_IDS_IAMS = "PREFS_OS_CLICKED_CLICK_IDS_IAMS";
+    //  2. Match keys with value names
+    //  ex.
+    //   public static final String PREFS_OS_LAST_LOCATION_TIME = "OS_LAST_LOCATION_TIME";
+    //  3. Follow syntax and make new names relevant (specific and as short as possible)
+    //  ex.
+    //   Start with prefix "PREFS_OS_" + "LAST_LOCATION_TIME"
 
     // SharedPreferences Instances
     public static final String PREFS_ONESIGNAL = OneSignal.class.getSimpleName();
     public static final String PREFS_PLAYER_PURCHASES = "GTPlayerPurchases";
     public static final String PREFS_TRIGGERS = "OneSignalTriggers";
 
-    // PREFERENCES KEYS
+    // SharedPreference Keys
+    // Unorganized Keys
     public static final String PREFS_OS_LAST_LOCATION_TIME = "OS_LAST_LOCATION_TIME";
     public static final String PREFS_GT_SOUND_ENABLED = "GT_SOUND_ENABLED";
     public static final String PREFS_OS_LAST_SESSION_TIME = "OS_LAST_SESSION_TIME";
@@ -57,8 +72,8 @@ class OneSignalPrefs {
     public static final String PREFS_OS_FILTER_OTHER_GCM_RECEIVERS = "OS_FILTER_OTHER_GCM_RECEIVERS";
     public static final String PREFS_GT_APP_ID = "GT_APP_ID";
     public static final String PREFS_GT_PLAYER_ID = "GT_PLAYER_ID";
-    public static final String PREFS_OS_EMAIL_ID = "OS_EMAIL_ID";
     public static final String PREFS_GT_UNSENT_ACTIVE_TIME = "GT_UNSENT_ACTIVE_TIME";
+    public static final String PREFS_OS_UNSENT_ATTRIBUTED_ACTIVE_TIME = "OS_UNSENT_ATTRIBUTED_ACTIVE_TIME";
     public static final String PREFS_ONESIGNAL_USERSTATE_DEPENDVALYES_ = "ONESIGNAL_USERSTATE_DEPENDVALYES_";
     public static final String PREFS_ONESIGNAL_USERSTATE_SYNCVALYES_ = "ONESIGNAL_USERSTATE_SYNCVALYES_";
     public static final String PREFS_ONESIGNAL_ACCEPTED_NOTIFICATION_LAST = "ONESIGNAL_ACCEPTED_NOTIFICATION_LAST";
@@ -66,8 +81,6 @@ class OneSignalPrefs {
     public static final String PREFS_ONESIGNAL_PLAYER_ID_LAST = "ONESIGNAL_PLAYER_ID_LAST";
     public static final String PREFS_ONESIGNAL_PUSH_TOKEN_LAST = "ONESIGNAL_PUSH_TOKEN_LAST";
     public static final String PREFS_ONESIGNAL_PERMISSION_ACCEPTED_LAST = "ONESIGNAL_PERMISSION_ACCEPTED_LAST";
-    public static final String PREFS_ONESIGNAL_EMAIL_ID_LAST = "PREFS_ONESIGNAL_EMAIL_ID_LAST";
-    public static final String PREFS_ONESIGNAL_EMAIL_ADDRESS_LAST = "PREFS_ONESIGNAL_EMAIL_ADDRESS_LAST";
     public static final String PREFS_GT_DO_NOT_SHOW_MISSING_GPS = "GT_DO_NOT_SHOW_MISSING_GPS";
     public static final String PREFS_ONESIGNAL_SUBSCRIPTION = "ONESIGNAL_SUBSCRIPTION";
     public static final String PREFS_ONESIGNAL_SYNCED_SUBSCRIPTION = "ONESIGNAL_SYNCED_SUBSCRIPTION";
@@ -75,12 +88,22 @@ class OneSignalPrefs {
     public static final String PREFS_ONESIGNAL_USER_PROVIDED_CONSENT = "ONESIGNAL_USER_PROVIDED_CONSENT";
     public static final String PREFS_OS_ETAG_PREFIX = "PREFS_OS_ETAG_PREFIX_";
     public static final String PREFS_OS_HTTP_CACHE_PREFIX = "PREFS_OS_HTTP_CACHE_PREFIX_";
+    // On Focus Influence
+    public static final String PREFS_OS_ATTRIBUTED_INFLUENCES = "PREFS_OS_ATTRIBUTED_INFLUENCES";
+    // Email
+    public static final String PREFS_OS_EMAIL_ID = "OS_EMAIL_ID";
+    public static final String PREFS_ONESIGNAL_EMAIL_ID_LAST = "PREFS_ONESIGNAL_EMAIL_ID_LAST";
+    public static final String PREFS_ONESIGNAL_EMAIL_ADDRESS_LAST = "PREFS_ONESIGNAL_EMAIL_ADDRESS_LAST";
+    // In-App Messaging
     public static final String PREFS_OS_CACHED_IAMS = "PREFS_OS_CACHED_IAMS";
-    public static final String PREFS_OS_DISPLAYED_IAMS = "PREFS_OS_DISPLAYED_IAMS";
+    public static final String PREFS_OS_DISMISSED_IAMS = "PREFS_OS_DISPLAYED_IAMS";
     public static final String PREFS_OS_IMPRESSIONED_IAMS = "PREFS_OS_IMPRESSIONED_IAMS";
     public static final String PREFS_OS_CLICKED_CLICK_IDS_IAMS = "PREFS_OS_CLICKED_CLICK_IDS_IAMS";
-
-    // PLAYER PURCHASE KEYS
+    // Receive Receipts (aka Confirmed Deliveries)
+    public static final String PREFS_OS_RECEIVE_RECEIPTS_ENABLED = "PREFS_OS_RECEIVE_RECEIPTS_ENABLED";
+    // Outcomes
+    static final String PREFS_OS_OUTCOMES_V2 = "PREFS_OS_OUTCOMES_V2";
+    // Player Purchase Keys
     static final String PREFS_PURCHASE_TOKENS = "purchaseTokens";
     static final String PREFS_EXISTING_PURCHASES = "ExistingPurchases";
 
@@ -93,43 +116,66 @@ class OneSignalPrefs {
     }
 
     public static class WritePrefHandlerThread extends HandlerThread {
-        public Handler mHandler;
+        private @Nullable Handler mHandler;
 
         private static final int WRITE_CALL_DELAY_TO_BUFFER_MS = 200;
         private long lastSyncTime = 0L;
 
         WritePrefHandlerThread(String name) {
             super(name);
-            start();
+        }
+
+        @Override
+        protected void onLooperPrepared() {
+            super.onLooperPrepared();
+
+            // Getting handler here as onLooperPrepared guarantees getLooper() will be non-null
             mHandler = new Handler(getLooper());
+
+            // Kicks off our first flush, startDelayedWrite will schedule all flushes after that
+            scheduleFlushToDisk();
         }
 
-        void startDelayedWrite() {
-            synchronized (mHandler) {
-                mHandler.removeCallbacksAndMessages(null);
-                if (lastSyncTime == 0)
-                    lastSyncTime = System.currentTimeMillis();
+        private synchronized void startDelayedWrite() {
+            // A Context is required to write,
+            //   if not available now later OneSignal.setContext will call this again.
+            if (OneSignal.appContext == null)
+                return;
 
-                long delay = lastSyncTime - System.currentTimeMillis() + WRITE_CALL_DELAY_TO_BUFFER_MS;
-
-                mHandler.postDelayed(getNewRunnable(), delay);
-            }
+            startThread();
+            scheduleFlushToDisk();
         }
 
-        private Runnable getNewRunnable() {
-            return new Runnable() {
+        private boolean threadStartCalled;
+        private void startThread() {
+            if (threadStartCalled)
+                return;
+
+            start();
+            threadStartCalled = true;
+        }
+
+        private synchronized void scheduleFlushToDisk() {
+            // Could be null if looper thread just started
+            if (mHandler == null)
+                return;
+
+            mHandler.removeCallbacksAndMessages(null);
+
+            if (lastSyncTime == 0)
+                lastSyncTime = System.currentTimeMillis();
+            long delay = lastSyncTime - System.currentTimeMillis() + WRITE_CALL_DELAY_TO_BUFFER_MS;
+
+            Runnable runnable = new Runnable() {
                 @Override
                 public void run() {
                     flushBufferToDisk();
                 }
             };
+            mHandler.postDelayed(runnable, delay);
         }
 
         private void flushBufferToDisk() {
-            // A flush will be triggered later once a context is set via OneSignal.setAppContext(...)
-            if (OneSignal.appContext == null)
-                return;
-
             for (String pref : prefsToApply.keySet()) {
                 SharedPreferences prefsToWrite = getSharedPrefsByName(pref);
                 SharedPreferences.Editor editor = prefsToWrite.edit();
@@ -240,7 +286,7 @@ class OneSignalPrefs {
         }
 
         SharedPreferences prefs = getSharedPrefsByName(prefsName);
-        if (prefs != null ) {
+        if (prefs != null) {
             if (type.equals(String.class))
                return prefs.getString(key, (String)defValue);
             else if (type.equals(Boolean.class))
@@ -260,7 +306,7 @@ class OneSignalPrefs {
         return defValue;
     }
 
-    private static synchronized SharedPreferences getSharedPrefsByName(String prefsName) {
+    static synchronized SharedPreferences getSharedPrefsByName(String prefsName) {
         if (OneSignal.appContext == null) {
             String msg = "OneSignal.appContext null, could not read " + prefsName + " from getSharedPreferences.";
             OneSignal.Log(OneSignal.LOG_LEVEL.WARN, msg, new Throwable());
