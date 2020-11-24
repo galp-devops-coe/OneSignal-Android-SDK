@@ -36,7 +36,6 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ResolveInfo;
 import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
 import android.location.Location;
 import android.net.ConnectivityManager;
 import android.os.Bundle;
@@ -70,15 +69,15 @@ import com.onesignal.ShadowCustomTabsClient;
 import com.onesignal.ShadowCustomTabsSession;
 import com.onesignal.ShadowFirebaseAnalytics;
 import com.onesignal.ShadowFusedLocationApiWrapper;
-import com.onesignal.ShadowHMSFusedLocationProviderClient;
+import com.onesignal.ShadowGMSLocationController;
+import com.onesignal.ShadowGMSLocationUpdateListener;
 import com.onesignal.ShadowGoogleApiClientBuilder;
 import com.onesignal.ShadowGoogleApiClientCompatProxy;
+import com.onesignal.ShadowHMSFusedLocationProviderClient;
 import com.onesignal.ShadowHMSLocationUpdateListener;
 import com.onesignal.ShadowHmsInstanceId;
 import com.onesignal.ShadowHuaweiTask;
 import com.onesignal.ShadowJobService;
-import com.onesignal.ShadowGMSLocationController;
-import com.onesignal.ShadowGMSLocationUpdateListener;
 import com.onesignal.ShadowNotificationManagerCompat;
 import com.onesignal.ShadowOSUtils;
 import com.onesignal.ShadowOneSignal;
@@ -238,7 +237,7 @@ public class MainOneSignalClassRunner {
 
       notificationOpenedMessage = null;
       lastGetTags = null;
-      lastExternalUserIdResponse = null;
+      lastExternalUserIdResponse = null;;
 
       ShadowGMSLocationController.reset();
       TestHelpers.beforeTestInitAndCleanup();
@@ -3653,8 +3652,7 @@ public class MainOneSignalClassRunner {
       assertEquals(0, ShadowRoboNotificationManager.notifications.size());
 
       // Make sure they are marked dismissed.
-      SQLiteDatabase readableDb = dbHelper.getSQLiteDatabaseWithRetries();
-      Cursor cursor = readableDb.query(OneSignalPackagePrivateHelper.NotificationTable.TABLE_NAME, new String[] { "created_time" },
+      Cursor cursor = dbHelper.query(OneSignalPackagePrivateHelper.NotificationTable.TABLE_NAME, new String[] { "created_time" },
           OneSignalPackagePrivateHelper.NotificationTable.COLUMN_NAME_DISMISSED + " = 1", null, null, null, null);
       assertEquals(2, cursor.getCount());
       cursor.close();
@@ -4124,6 +4122,125 @@ public class MainOneSignalClassRunner {
       ShadowOneSignalRestClient.Request registrationRequest = ShadowOneSignalRestClient.requests.get(1);
       assertEquals(ShadowOneSignalRestClient.REST_METHOD.POST, registrationRequest.method);
       assertEquals(testExternalId, registrationRequest.payload.getString("external_user_id"));
+   }
+
+   @Test
+   public void shouldSetExternalIdWithAuthHash() throws Exception {
+      ShadowOneSignalRestClient.paramExtras = new JSONObject().put("require_user_id_auth", true);
+
+      OneSignalInit();
+      threadAndTaskWait();
+
+      String testExternalId = "test_ext_id";
+
+      OneSignal.setExternalUserId(testExternalId, getExternalUserIdUpdateCompletionHandler());
+      threadAndTaskWait();
+   }
+
+   @Test
+   public void shouldSetExternalIdWithAuthHashAfterRegistration() throws Exception {
+      OneSignalInit();
+      threadAndTaskWait();
+
+      String testExternalId = "test_ext_id";
+      String mockExternalIdHash = new String(new char[64]).replace('\0', '0');
+
+      OneSignal.setExternalUserId(testExternalId, mockExternalIdHash, null);
+      threadAndTaskWait();
+
+      assertEquals(3, ShadowOneSignalRestClient.networkCallCount);
+
+      ShadowOneSignalRestClient.Request externalIdRequest = ShadowOneSignalRestClient.requests.get(2);
+      assertEquals(ShadowOneSignalRestClient.REST_METHOD.PUT, externalIdRequest.method);
+      assertEquals(testExternalId, externalIdRequest.payload.getString("external_user_id"));
+      assertEquals(mockExternalIdHash, externalIdRequest.payload.getString("external_user_id_auth_hash"));
+   }
+
+   @Test
+   public void shouldSetExternalIdWithAuthHashBeforeRegistration() throws Exception {
+      String testExternalId = "test_ext_id";
+      String mockExternalIdHash = new String(new char[64]).replace('\0', '0');
+
+      OneSignal.setExternalUserId(testExternalId, mockExternalIdHash, null);
+
+      OneSignalInit();
+      threadAndTaskWait();
+
+      assertEquals(2, ShadowOneSignalRestClient.networkCallCount);
+
+      ShadowOneSignalRestClient.Request registrationRequest = ShadowOneSignalRestClient.requests.get(1);
+      assertEquals(ShadowOneSignalRestClient.REST_METHOD.POST, registrationRequest.method);
+      assertEquals(testExternalId, registrationRequest.payload.getString("external_user_id"));
+      assertEquals(mockExternalIdHash, registrationRequest.payload.getString("external_user_id_auth_hash"));
+   }
+
+   @Test
+   public void shouldAlwaysSetExternalIdWithAuthHashAAfterRegistration() throws Exception {
+      OneSignalInit();
+      threadAndTaskWait();
+
+      String testExternalId = "test_ext_id";
+      String mockExternalIdHash = new String(new char[64]).replace('\0', '0');
+
+      OneSignal.setExternalUserId(testExternalId, mockExternalIdHash);
+      threadAndTaskWait();
+
+      ShadowOneSignalRestClient.Request registrationRequest = ShadowOneSignalRestClient.requests.get(2);
+      assertEquals(ShadowOneSignalRestClient.REST_METHOD.PUT, registrationRequest.method);
+      assertEquals(testExternalId, registrationRequest.payload.getString("external_user_id"));
+      assertEquals(mockExternalIdHash, registrationRequest.payload.getString("external_user_id_auth_hash"));
+
+      fastColdRestartApp();
+
+      advanceSystemTimeBy(60);
+      OneSignalInit();
+      threadAndTaskWait();
+
+      ShadowOneSignalRestClient.Request registrationRequestAfterColdStart = ShadowOneSignalRestClient.requests.get(4);
+      assertEquals(REST_METHOD.POST, registrationRequestAfterColdStart.method);
+      assertEquals(mockExternalIdHash, registrationRequestAfterColdStart.payload.getString("external_user_id_auth_hash"));
+   }
+
+   @Test
+   public void shouldAlwaysSetExternalIdAndEmailWithAuthHashAAfterRegistration() throws Exception {
+      OneSignalInit();
+      threadAndTaskWait();
+
+      String testExternalId = "test_ext_id";
+      String mockExternalIdHash = new String(new char[64]).replace('\0', '0');
+
+      String email = "josh@onesignal.com";
+      String mockEmailHash = new String(new char[64]).replace('\0', '0');
+
+      OneSignal.setExternalUserId(testExternalId, mockExternalIdHash);
+      OneSignal.setEmail(email, mockEmailHash);
+      threadAndTaskWait();
+
+      ShadowOneSignalRestClient.Request registrationRequest = ShadowOneSignalRestClient.requests.get(2);
+      assertEquals(ShadowOneSignalRestClient.REST_METHOD.PUT, registrationRequest.method);
+      assertEquals(testExternalId, registrationRequest.payload.getString("external_user_id"));
+      assertEquals(mockExternalIdHash, registrationRequest.payload.getString("external_user_id_auth_hash"));
+
+      ShadowOneSignalRestClient.Request emailPost = ShadowOneSignalRestClient.requests.get(3);
+      assertEquals(REST_METHOD.POST, emailPost.method);
+      assertEquals(email, emailPost.payload.getString("identifier"));
+      assertEquals(11, emailPost.payload.getInt("device_type"));
+      assertEquals(mockEmailHash, emailPost.payload.getString("email_auth_hash"));
+
+      fastColdRestartApp();
+
+      advanceSystemTimeBy(60);
+      OneSignalInit();
+      threadAndTaskWait();
+
+      ShadowOneSignalRestClient.Request registrationRequestAfterColdStart = ShadowOneSignalRestClient.requests.get(6);
+      assertEquals(REST_METHOD.POST, registrationRequestAfterColdStart.method);
+      assertEquals(mockExternalIdHash, registrationRequestAfterColdStart.payload.getString("external_user_id_auth_hash"));
+
+      ShadowOneSignalRestClient.Request emailPostAfterColdStart = ShadowOneSignalRestClient.requests.get(7);
+      assertEquals(REST_METHOD.POST, emailPostAfterColdStart.method);
+      assertEquals(11, emailPostAfterColdStart.payload.getInt("device_type"));
+      assertEquals(mockEmailHash, emailPostAfterColdStart.payload.getString("email_auth_hash"));
    }
 
    @Test
