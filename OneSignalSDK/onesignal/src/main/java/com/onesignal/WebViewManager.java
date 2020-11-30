@@ -84,6 +84,7 @@ class WebViewManager extends ActivityLifecycleHandler.ActivityAvailableListener 
      */
     static void showHTMLString(@NonNull final OSInAppMessage message, @NonNull final String htmlStr) {
         final Activity currentActivity = ActivityLifecycleHandler.curActivity;
+        OneSignal.onesignalLog(OneSignal.LOG_LEVEL.DEBUG, "in app message showHTMLString on currentActivity: " + currentActivity);
         /* IMPORTANT
          * This is the starting route for grabbing the current Activity and passing it to InAppMessageView */
         if (currentActivity != null) {
@@ -98,9 +99,9 @@ class WebViewManager extends ActivityLifecycleHandler.ActivityAvailableListener 
                         initInAppMessage(currentActivity, message, htmlStr);
                     }
                 });
-            }
-            else
+            } else {
                 initInAppMessage(currentActivity, message, htmlStr);
+            }
             return;
         }
 
@@ -206,9 +207,9 @@ class WebViewManager extends ActivityLifecycleHandler.ActivityAvailableListener 
             JSONObject body = jsonObject.getJSONObject("body");
             String id = body.optString("id", null);
             if (message.isPreview) {
-                OSInAppMessageController.getController().onMessageActionOccurredOnPreview(message, body);
+                OneSignal.getInAppMessageController().onMessageActionOccurredOnPreview(message, body);
             } else if (id != null) {
-                OSInAppMessageController.getController().onMessageActionOccurredOnMessage(message, body);
+                OneSignal.getInAppMessageController().onMessageActionOccurredOnMessage(message, body);
             }
 
             boolean close = body.getBoolean("close");
@@ -239,11 +240,16 @@ class WebViewManager extends ActivityLifecycleHandler.ActivityAvailableListener 
     // Every time an Activity is shown we update the height of the WebView since the available
     //   screen size may have changed. (Expect for Fullscreen)
     private void calculateHeightAndShowWebViewAfterNewActivity() {
+        if (messageView == null)
+            return;
+
         // Don't need a CSS / HTML height update for fullscreen
         if (messageView.getDisplayPosition() == Position.FULL_SCREEN) {
             showMessageView(null);
             return;
         }
+
+        OneSignal.Log(OneSignal.LOG_LEVEL.DEBUG, "In app message new activity, calculate height and show ");
 
        // Using post to ensure that the status bar inset is already added to the view
        OSViewUtils.decorViewReady(activity, new Runnable() {
@@ -277,9 +283,16 @@ class WebViewManager extends ActivityLifecycleHandler.ActivityAvailableListener 
     }
 
     @Override
-    void stopped(WeakReference<Activity> reference) {
+    void stopped() {
         if (messageView != null)
             messageView.removeAllViews();
+    }
+
+    @Override
+    void lostFocus() {
+        OneSignal.getInAppMessageController().messageWasDismissedByBackPress(message);
+        removeActivityListener();
+        messageView = null;
     }
 
     private void showMessageView(@Nullable Integer newHeight) {
@@ -288,6 +301,7 @@ class WebViewManager extends ActivityLifecycleHandler.ActivityAvailableListener 
             return;
         }
 
+        OneSignal.Log(OneSignal.LOG_LEVEL.DEBUG, "In app message, showing first one with height: " + newHeight);
         messageView.setWebView(webView);
         if (newHeight != null)
             messageView.updateHeight(newHeight);
@@ -344,13 +358,13 @@ class WebViewManager extends ActivityLifecycleHandler.ActivityAvailableListener 
             @Override
             public void onMessageWasShown() {
                 firstShow = false;
-                OSInAppMessageController.getController().onMessageWasShown(message);
+                OneSignal.getInAppMessageController().onMessageWasShown(message);
             }
 
             @Override
             public void onMessageWasDismissed() {
-                OSInAppMessageController.getController().messageWasDismissed(message);
-                ActivityLifecycleHandler.removeActivityAvailableListener(TAG + message.messageId);
+                OneSignal.getInAppMessageController().messageWasDismissed(message);
+                removeActivityListener();
             }
         });
 
@@ -374,6 +388,9 @@ class WebViewManager extends ActivityLifecycleHandler.ActivityAvailableListener 
        return OSViewUtils.getWindowHeight(activity) - (MARGIN_PX_SIZE * 2);
     }
 
+    private void removeActivityListener() {
+        ActivityLifecycleHandler.removeActivityAvailableListener(TAG + message.messageId);
+    }
     /**
      * Trigger the {@link #messageView} dismiss animation flow
      */

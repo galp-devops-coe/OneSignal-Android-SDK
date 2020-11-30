@@ -37,7 +37,6 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
 import android.os.Build;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
@@ -431,19 +430,23 @@ public class OneSignal {
    private static TrackAmazonPurchase trackAmazonPurchase;
    private static TrackFirebaseAnalytics trackFirebaseAnalytics;
 
-   public static final String VERSION = "031501";
+   public static final String VERSION = "031505";
 
    private static OSSessionManager.SessionListener sessionListener = new OSSessionManager.SessionListener() {
          @Override
          public void onSessionEnding(@NonNull List<OSInfluence> lastInfluences) {
             if (outcomeEventsController == null)
-               OneSignal.Log(LOG_LEVEL.WARN, "OneSignal onSessionEnding called before initZ");
+               OneSignal.Log(LOG_LEVEL.WARN, "OneSignal onSessionEnding called before init!");
             if (outcomeEventsController != null)
                outcomeEventsController.cleanOutcomes();
             FocusTimeController.getInstance().onSessionEnded(lastInfluences);
          }
       };
 
+   private static OSInAppMessageControllerFactory inAppMessageControllerFactory = new OSInAppMessageControllerFactory();
+   static OSInAppMessageController getInAppMessageController() {
+      return inAppMessageControllerFactory.getController(getDBHelperInstance());
+   }
    private static OSLogger logger = new OSLogWrapper();
    private static OneSignalAPIClient apiClient = new OneSignalRestClientWrapper();
    private static OSSharedPreferences preferences = new OSSharedPreferencesWrapper();
@@ -843,15 +846,18 @@ public class OneSignal {
    private static void doSessionInit() {
       // Check session time to determine whether to start a new session or not
       if (isPastOnSessionTime()) {
-          OneSignalStateSynchronizer.setNewSession();
+         OneSignal.onesignalLog(LOG_LEVEL.DEBUG, "Starting new session");
+         OneSignalStateSynchronizer.setNewSession();
          if (foreground) {
             outcomeEventsController.cleanOutcomes();
             sessionManager.restartSessionIfNeeded(getAppEntryState());
+            getInAppMessageController().resetSessionLaunchTime();
          }
       } else if (foreground) {
-         OSInAppMessageController.getController().initWithCachedInAppMessages();
+         OneSignal.onesignalLog(LOG_LEVEL.DEBUG, "Continue on same session");
          sessionManager.attemptSessionUpgrade(getAppEntryState());
       }
+      getInAppMessageController().initWithCachedInAppMessages();
 
       // We still want register the user to OneSignal if the SDK was initialized
       //   in the background for the first time.
@@ -1245,6 +1251,7 @@ public class OneSignal {
    // Returns true if there is active time that is unsynced.
    @WorkerThread
    static void onAppLostFocus() {
+      Log(LOG_LEVEL.DEBUG, "Application lost focus");
       foreground = false;
       appEntryState = AppEntryAction.APP_CLOSE;
 
@@ -1278,6 +1285,7 @@ public class OneSignal {
    }
 
    static void onAppFocus() {
+      Log(LOG_LEVEL.DEBUG, "Application on focus");
       foreground = true;
 
       // If the app gains focus and has not been set to NOTIFICATION_CLICK yet we can assume this is a normal app open
@@ -1541,11 +1549,18 @@ public class OneSignal {
    }
 
    public static void setExternalUserId(@NonNull final String externalId) {
-      setExternalUserId(externalId, null);
+      setExternalUserId(externalId, null, null);
    }
 
    public static void setExternalUserId(@NonNull final String externalId, @Nullable final OSExternalUserIdUpdateCompletionHandler completionCallback) {
+      setExternalUserId(externalId, null, completionCallback);
+   }
 
+   public static void setExternalUserId(@NonNull final String externalId,  @Nullable final String externalIdAuthHash) {
+      setExternalUserId(externalId, externalIdAuthHash, null);
+   }
+
+   public static void setExternalUserId(@NonNull final String externalId, @Nullable final String externalIdAuthHash, @Nullable final OSExternalUserIdUpdateCompletionHandler completionCallback) {
       if (shouldLogUserPrivacyConsentErrorMessageForMethodName("setExternalUserId()"))
          return;
 
@@ -1557,8 +1572,18 @@ public class OneSignal {
                return;
             }
 
+            if (remoteParams != null && remoteParams.useUserIdAuth && externalIdAuthHash == null) {
+               String errorMessage = "External Id authentication (auth token) is set to REQUIRED for this application. Please provide an auth token from your backend server or change the setting in the OneSignal dashboard.";
+               Log(LOG_LEVEL.ERROR, errorMessage);
+               return;
+            }
+
+            String lowerCaseIdAuthHash = externalIdAuthHash;
+            if (lowerCaseIdAuthHash != null)
+               lowerCaseIdAuthHash = externalIdAuthHash.toLowerCase();
+
             try {
-               OneSignalStateSynchronizer.setExternalUserId(externalId, completionCallback);
+               OneSignalStateSynchronizer.setExternalUserId(externalId, lowerCaseIdAuthHash, completionCallback);
             } catch (JSONException exception) {
                String operation = externalId.equals("") ? "remove" : "set";
                onesignalLog(LOG_LEVEL.ERROR, "Attempted to " + operation + " external ID but encountered a JSON exception");
@@ -2625,61 +2650,35 @@ public class OneSignal {
             NotificationManager notificationManager = OneSignalNotificationManager.getNotificationManager(appContext);
 
             OneSignalDbHelper dbHelper = OneSignalDbHelper.getInstance(appContext);
-            Cursor cursor = null;
-            try {
-               SQLiteDatabase readableDb = dbHelper.getSQLiteDatabaseWithRetries();
+            String[] retColumn = {OneSignalDbContract.NotificationTable.COLUMN_NAME_ANDROID_NOTIFICATION_ID};
 
-               String[] retColumn = {OneSignalDbContract.NotificationTable.COLUMN_NAME_ANDROID_NOTIFICATION_ID};
+            Cursor cursor = dbHelper.query(
+                    OneSignalDbContract.NotificationTable.TABLE_NAME,
+                    retColumn,
+                    OneSignalDbContract.NotificationTable.COLUMN_NAME_DISMISSED + " = 0 AND " +
+                            OneSignalDbContract.NotificationTable.COLUMN_NAME_OPENED + " = 0",
+                    null,
+                    null,                                                    // group by
+                    null,                                                    // filter by row groups
+                    null                                                     // sort order
+            );
 
-               cursor = readableDb.query(
-                       OneSignalDbContract.NotificationTable.TABLE_NAME,
-                       retColumn,
-                       OneSignalDbContract.NotificationTable.COLUMN_NAME_DISMISSED + " = 0 AND " +
-                               OneSignalDbContract.NotificationTable.COLUMN_NAME_OPENED + " = 0",
-                       null,
-                       null,                                                    // group by
-                       null,                                                    // filter by row groups
-                       null                                                     // sort order
-               );
-
-               if (cursor.moveToFirst()) {
-                  do {
-                     int existingId = cursor.getInt(cursor.getColumnIndex(OneSignalDbContract.NotificationTable.COLUMN_NAME_ANDROID_NOTIFICATION_ID));
-                     notificationManager.cancel(existingId);
-                  } while (cursor.moveToNext());
-               }
-
-
-               // Mark all notifications as dismissed unless they were already opened.
-               SQLiteDatabase writableDb = null;
-               try {
-                  writableDb = dbHelper.getSQLiteDatabaseWithRetries();
-                  writableDb.beginTransaction();
-
-                  String whereStr = NotificationTable.COLUMN_NAME_OPENED + " = 0";
-                  ContentValues values = new ContentValues();
-                  values.put(NotificationTable.COLUMN_NAME_DISMISSED, 1);
-                  writableDb.update(NotificationTable.TABLE_NAME, values, whereStr, null);
-                  writableDb.setTransactionSuccessful();
-               } catch (Throwable t) {
-                  OneSignal.Log(OneSignal.LOG_LEVEL.ERROR, "Error marking all notifications as dismissed! ", t);
-               } finally {
-                  if (writableDb != null) {
-                     try {
-                        writableDb.endTransaction(); // May throw if transaction was never opened or DB is full.
-                     } catch (Throwable t) {
-                        OneSignal.Log(OneSignal.LOG_LEVEL.ERROR, "Error closing transaction! ", t);
-                     }
-                  }
-               }
-
-               BadgeCountUpdater.updateCount(0, appContext);
-            } catch (Throwable t) {
-               OneSignal.Log(OneSignal.LOG_LEVEL.ERROR, "Error canceling all notifications! ", t);
-            } finally {
-               if (cursor != null)
-                  cursor.close();
+            if (cursor.moveToFirst()) {
+               do {
+                  int existingId = cursor.getInt(cursor.getColumnIndex(OneSignalDbContract.NotificationTable.COLUMN_NAME_ANDROID_NOTIFICATION_ID));
+                  notificationManager.cancel(existingId);
+               } while (cursor.moveToNext());
             }
+
+            // Mark all notifications as dismissed unless they were already opened.
+            String whereStr = NotificationTable.COLUMN_NAME_OPENED + " = 0";
+            ContentValues values = new ContentValues();
+            values.put(NotificationTable.COLUMN_NAME_DISMISSED, 1);
+            dbHelper.update(NotificationTable.TABLE_NAME, values, whereStr, null);
+
+            BadgeCountUpdater.updateCount(0, appContext);
+
+            cursor.close();
          }
       };
 
@@ -2705,36 +2704,18 @@ public class OneSignal {
          @Override
          public void run() {
             OneSignalDbHelper dbHelper = OneSignalDbHelper.getInstance(appContext);
-            SQLiteDatabase writableDb = null;
-            try {
-               writableDb = dbHelper.getSQLiteDatabaseWithRetries();
-               writableDb.beginTransaction();
+            String whereStr = NotificationTable.COLUMN_NAME_ANDROID_NOTIFICATION_ID + " = " + id + " AND " +
+                    NotificationTable.COLUMN_NAME_OPENED + " = 0 AND " +
+                    NotificationTable.COLUMN_NAME_DISMISSED + " = 0";
 
-               String whereStr = NotificationTable.COLUMN_NAME_ANDROID_NOTIFICATION_ID + " = " + id + " AND " +
-                       NotificationTable.COLUMN_NAME_OPENED + " = 0 AND " +
-                       NotificationTable.COLUMN_NAME_DISMISSED + " = 0";
+            ContentValues values = new ContentValues();
+            values.put(NotificationTable.COLUMN_NAME_DISMISSED, 1);
 
-               ContentValues values = new ContentValues();
-               values.put(NotificationTable.COLUMN_NAME_DISMISSED, 1);
+            int records = dbHelper.update(NotificationTable.TABLE_NAME, values, whereStr, null);
 
-               int records = writableDb.update(NotificationTable.TABLE_NAME, values, whereStr, null);
-
-               if (records > 0)
-                  NotificationSummaryManager.updatePossibleDependentSummaryOnDismiss(appContext, writableDb, id);
-               BadgeCountUpdater.update(writableDb, appContext);
-
-               writableDb.setTransactionSuccessful();
-            } catch (Throwable t) {
-               OneSignal.Log(OneSignal.LOG_LEVEL.ERROR, "Error marking a notification id " + id + " as dismissed! ", t);
-            } finally {
-               if (writableDb != null) {
-                  try {
-                     writableDb.endTransaction(); // May throw if transaction was never opened or DB is full.
-                  } catch (Throwable t) {
-                     OneSignal.Log(OneSignal.LOG_LEVEL.ERROR, "Error closing transaction! ", t);
-                  }
-               }
-            }
+            if (records > 0)
+               NotificationSummaryManager.updatePossibleDependentSummaryOnDismiss(appContext, dbHelper, id);
+            BadgeCountUpdater.update(dbHelper, appContext);
 
             NotificationManager notificationManager = OneSignalNotificationManager.getNotificationManager(appContext);
             notificationManager.cancel(id);
@@ -2766,67 +2747,38 @@ public class OneSignal {
             NotificationManager notificationManager = OneSignalNotificationManager.getNotificationManager(appContext);
 
             OneSignalDbHelper dbHelper = OneSignalDbHelper.getInstance(appContext);
-            Cursor cursor = null;
 
-            try {
-               SQLiteDatabase readableDb = dbHelper.getSQLiteDatabaseWithRetries();
+            String[] retColumn = {NotificationTable.COLUMN_NAME_ANDROID_NOTIFICATION_ID};
 
-               String[] retColumn = { NotificationTable.COLUMN_NAME_ANDROID_NOTIFICATION_ID };
+            final String[] whereArgs = {group};
 
-               String whereStr =  NotificationTable.COLUMN_NAME_GROUP_ID + " = ? AND " +
-                       NotificationTable.COLUMN_NAME_DISMISSED + " = 0 AND " +
-                       NotificationTable.COLUMN_NAME_OPENED + " = 0";
-               String[] whereArgs = { group };
+            String whereStr = NotificationTable.COLUMN_NAME_GROUP_ID + " = ? AND " +
+                    NotificationTable.COLUMN_NAME_DISMISSED + " = 0 AND " +
+                    NotificationTable.COLUMN_NAME_OPENED + " = 0";
 
-               cursor = readableDb.query(
-                       NotificationTable.TABLE_NAME,
-                       retColumn,
-                       whereStr,
-                       whereArgs,
-                       null, null, null);
+            Cursor cursor = dbHelper.query(
+                    NotificationTable.TABLE_NAME,
+                    retColumn,
+                    whereStr,
+                    whereArgs,
+                    null, null, null);
 
-               while (cursor.moveToNext()) {
-                  int notifId = cursor.getInt(cursor.getColumnIndex(NotificationTable.COLUMN_NAME_ANDROID_NOTIFICATION_ID));
-                  if (notifId != -1)
-                     notificationManager.cancel(notifId);
-               }
+            while (cursor.moveToNext()) {
+               int notificationId = cursor.getInt(cursor.getColumnIndex(NotificationTable.COLUMN_NAME_ANDROID_NOTIFICATION_ID));
+               if (notificationId != -1)
+                  notificationManager.cancel(notificationId);
             }
-            catch (Throwable t) {
-               OneSignal.Log(OneSignal.LOG_LEVEL.ERROR, "Error getting android notifications part of group: " + group, t);
-            }
-            finally {
-               if (cursor != null && !cursor.isClosed())
-                  cursor.close();
-            }
+            cursor.close();
 
-            SQLiteDatabase writableDb = null;
-            try {
-               writableDb = dbHelper.getSQLiteDatabaseWithRetries();
-               writableDb.beginTransaction();
+            whereStr = NotificationTable.COLUMN_NAME_GROUP_ID + " = ? AND " +
+                    NotificationTable.COLUMN_NAME_OPENED + " = 0 AND " +
+                    NotificationTable.COLUMN_NAME_DISMISSED + " = 0";
 
-               String whereStr = NotificationTable.COLUMN_NAME_GROUP_ID + " = ? AND " +
-                       NotificationTable.COLUMN_NAME_OPENED + " = 0 AND " +
-                       NotificationTable.COLUMN_NAME_DISMISSED + " = 0";
-               String[] whereArgs = { group };
+            ContentValues values = new ContentValues();
+            values.put(NotificationTable.COLUMN_NAME_DISMISSED, 1);
 
-               ContentValues values = new ContentValues();
-               values.put(NotificationTable.COLUMN_NAME_DISMISSED, 1);
-
-               writableDb.update(NotificationTable.TABLE_NAME, values, whereStr, whereArgs);
-               BadgeCountUpdater.update(writableDb, appContext);
-
-               writableDb.setTransactionSuccessful();
-            } catch (Throwable t) {
-               OneSignal.Log(OneSignal.LOG_LEVEL.ERROR, "Error marking a notifications with group " + group + " as dismissed! ", t);
-            } finally {
-               if (writableDb != null) {
-                  try {
-                     writableDb.endTransaction(); // May throw if transaction was never opened or DB is full.
-                  } catch (Throwable t) {
-                     OneSignal.Log(OneSignal.LOG_LEVEL.ERROR, "Error closing transaction! ", t);
-                  }
-               }
-            }
+            dbHelper.update(NotificationTable.TABLE_NAME, values, whereStr, whereArgs);
+            BadgeCountUpdater.update(dbHelper, appContext);
          }
       };
 
@@ -2997,7 +2949,7 @@ public class OneSignal {
     * Triggers are used for targeting in-app messages.
     */
    public static void addTriggers(Map<String, Object> triggers) {
-      OSInAppMessageController.getController().addTriggers(triggers);
+      getInAppMessageController().addTriggers(triggers);
    }
 
    /**
@@ -3020,13 +2972,13 @@ public class OneSignal {
       HashMap<String, Object> triggerMap = new HashMap<>();
       triggerMap.put(key, object);
 
-      OSInAppMessageController.getController().addTriggers(triggerMap);
+      getInAppMessageController().addTriggers(triggerMap);
    }
 
 
    /** Removes a list/collection of triggers from their keys with a Collection of Strings */
    public static void removeTriggersForKeys(Collection<String> keys) {
-      OSInAppMessageController.getController().removeTriggersForKeys(keys);
+      getInAppMessageController().removeTriggersForKeys(keys);
    }
 
    /** Removes a list/collection of triggers from their keys with a JSONArray String.
@@ -3040,7 +2992,7 @@ public class OneSignal {
          // Some keys were filtered, log as warning
          if (jsonArray.length() != keysCollection.size())
             OneSignal.Log(LOG_LEVEL.WARN, "removeTriggersForKeysFromJsonArrayString: Skipped removing non-String type keys ");
-         OSInAppMessageController.getController().removeTriggersForKeys(keysCollection);
+         getInAppMessageController().removeTriggersForKeys(keysCollection);
       } catch (JSONException e) {
          OneSignal.Log(LOG_LEVEL.ERROR, "removeTriggersForKeysFromJsonArrayString, invalid json", e);
       }
@@ -3051,13 +3003,13 @@ public class OneSignal {
       ArrayList<String> triggerKeys = new ArrayList<>();
       triggerKeys.add(key);
 
-      OSInAppMessageController.getController().removeTriggersForKeys(triggerKeys);
+      getInAppMessageController().removeTriggersForKeys(triggerKeys);
    }
 
    /** Returns a single trigger value for the given key (if it exists, otherwise returns null) */
    @Nullable
    public static Object getTriggerValueForKey(String key) {
-      return OSInAppMessageController.getController().getTriggerValue(key);
+      return getInAppMessageController().getTriggerValue(key);
    }
 
    /***
@@ -3067,40 +3019,28 @@ public class OneSignal {
     * @param pause The boolean that pauses/resumes in-app messages
     */
    public static void pauseInAppMessages(boolean pause) {
-      OSInAppMessageController.getController().setInAppMessagingEnabled(!pause);
+      getInAppMessageController().setInAppMessagingEnabled(!pause);
    }
 
    private static boolean isDuplicateNotification(String id, Context context) {
       if (id == null || "".equals(id))
          return false;
 
-      boolean exists = false;
-
       OneSignalDbHelper dbHelper = OneSignalDbHelper.getInstance(context);
-      Cursor cursor = null;
 
-      try {
-         SQLiteDatabase readableDb = dbHelper.getSQLiteDatabaseWithRetries();
+      String[] retColumn = {NotificationTable.COLUMN_NAME_NOTIFICATION_ID};
+      String[] whereArgs = {id};
 
-         String[] retColumn = {NotificationTable.COLUMN_NAME_NOTIFICATION_ID};
-         String[] whereArgs = {id};
+      Cursor cursor = dbHelper.query(
+              NotificationTable.TABLE_NAME,
+              retColumn,
+              NotificationTable.COLUMN_NAME_NOTIFICATION_ID + " = ?",   // Where String
+              whereArgs,
+              null, null, null);
 
-         cursor = readableDb.query(
-             NotificationTable.TABLE_NAME,
-             retColumn,
-             NotificationTable.COLUMN_NAME_NOTIFICATION_ID + " = ?",   // Where String
-             whereArgs,
-             null, null, null);
+      boolean exists = cursor.moveToFirst();
 
-         exists = cursor.moveToFirst();
-      }
-      catch (Throwable t) {
-         OneSignal.Log(LOG_LEVEL.ERROR, "Could not check for duplicate, assuming unique.", t);
-      }
-      finally {
-         if (cursor != null)
-            cursor.close();
-      }
+      cursor.close();
 
       if (exists) {
          Log(LOG_LEVEL.DEBUG, "Duplicate GCM message received, skip processing of " + id);
