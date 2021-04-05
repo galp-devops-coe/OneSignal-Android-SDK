@@ -41,7 +41,7 @@ dependencies {
 
     // play-services-location:16.0.0 is the last version before going to AndroidX
     // Can be compileOnly in 4.0.0, can't change until then as some projects may rely on this
-    implementation 'com.google.android.gms:play-services-location:[10.2.1, 16.0.99]'
+    implementation 'com.google.android.gms:play-services-location:16.0.0'
 
     // play-services-ads-identifier:15.0.0 first version
     //   Classes used to live in play-services-base before this
