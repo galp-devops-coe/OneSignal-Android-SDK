@@ -37,24 +37,24 @@ dependencies {
     // play-services-gcm:16.1.0 is the last version before going to AndroidX
     // compileOnly as this is just for fallback code if FCM wasn't added to the project.
     // Remove for 4.0.0 release
-    //compileOnly 'com.google.android.gms:play-services-gcm:16.1.0'
+    compileOnly 'com.google.android.gms:play-services-gcm:16.1.0'
 
     // play-services-location:16.0.0 is the last version before going to AndroidX
     // Can be compileOnly in 4.0.0, can't change until then as some projects may rely on this
-    compileOnly 'com.google.android.gms:play-services-location:[17.0.0, 17.99.99]'
+    implementation 'com.google.android.gms:play-services-location:16.0.0'
 
     // play-services-ads-identifier:15.0.0 first version
     //   Classes used to live in play-services-base before this
     // play-services-ads-identifier:16.0.0 is the last version before going to AndroidX
-    implementation 'com.google.android.gms:play-services-ads-identifier:[17.0.0, 17.99.99]'
+    implementation 'com.google.android.gms:play-services-ads-identifier:17.0.0'
 
     // :play-services-base:16.1.0 is the last version before going to AndroidX
     // Required for GoogleApiAvailability
-    implementation 'com.google.android.gms:play-services-base:[17.0.0, 17.99.99]'
+    implementation 'com.google.android.gms:play-services-base:16.0.1'
 
     // firebase-messaging:18.0.0 is the last version before going to AndroidX
     // firebase-messaging:17.6.0 is the max version since we still have code looking for FirebaseInstanceIdService
-    api 'com.google.firebase:firebase-messaging:[19.0.0, 21.99.99]'
+    api 'com.google.firebase:firebase-messaging:17.3.4'
 
     // Huawei PushKit
     // KEEP as "compileOnly", so OneSignal isn't a direct dependency in the POM file.
