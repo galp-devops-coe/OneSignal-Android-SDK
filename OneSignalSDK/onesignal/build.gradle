@@ -50,7 +50,7 @@ dependencies {
 
     // :play-services-base:16.1.0 is the last version before going to AndroidX
     // Required for GoogleApiAvailability
-    implementation 'com.google.android.gms:play-services-base:[10.2.1, 16.1.99]'
+    implementation 'com.google.android.gms:play-services-base:16.0.1'
 
     // firebase-messaging:18.0.0 is the last version before going to AndroidX
     // firebase-messaging:17.6.0 is the max version since we still have code looking for FirebaseInstanceIdService
