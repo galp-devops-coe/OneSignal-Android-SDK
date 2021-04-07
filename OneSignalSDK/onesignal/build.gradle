@@ -46,7 +46,7 @@ dependencies {
     // play-services-ads-identifier:15.0.0 first version
     //   Classes used to live in play-services-base before this
     // play-services-ads-identifier:16.0.0 is the last version before going to AndroidX
-    implementation 'com.google.android.gms:play-services-ads-identifier:[15.0.0, 16.0.99]'
+    implementation 'com.google.android.gms:play-services-ads-identifier:17.0.0'
 
     // :play-services-base:16.1.0 is the last version before going to AndroidX
     // Required for GoogleApiAvailability
