@@ -1,2 +1,2 @@
-include ':app', ':onesignal', ':unittest'
+include ':app', ':onesignal'
 project(':app').projectDir = new File(settingsDir, '../examples/OneSignalDemo/app')
