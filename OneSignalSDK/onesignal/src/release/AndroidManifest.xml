@@ -11,6 +11,7 @@
 
         <receiver
             android:name="com.onesignal.GcmBroadcastReceiver"
+            android:exported="true"
             android:permission="com.google.android.c2dm.permission.SEND" >
             <!-- High priority so OneSignal payloads can be filtered from other GCM receivers if filterOtherGCMReceivers is enabled. -->
             <intent-filter android:priority="999" >
