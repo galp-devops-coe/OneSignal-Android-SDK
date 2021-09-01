@@ -62,7 +62,7 @@
     <application>
 
         <receiver android:name="com.onesignal.NotificationOpenedReceiver"
-            android:exported="false"/>
+            android:exported="true"/>
 
         <service
             android:name="com.onesignal.HmsMessageServiceOneSignal"
