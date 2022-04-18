@@ -61,8 +61,13 @@
 
     <application>
 
-        <receiver android:name="com.onesignal.NotificationOpenedReceiver"
-            android:exported="true"/>
+        <activity
+            android:name="com.onesignal.NotificationOpenedReceiver"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="true" />
 
         <service
             android:name="com.onesignal.HmsMessageServiceOneSignal"
