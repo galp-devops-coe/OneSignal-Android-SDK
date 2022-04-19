@@ -28,24 +28,14 @@
 package com.onesignal;
 
 import android.app.Activity;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 
-public class NotificationOpenedActivity extends Activity {
-
+public class NotificationDismissReceiver extends BroadcastReceiver {
    @Override
-   protected void onCreate(Bundle savedInstanceState) {
-      super.onCreate(savedInstanceState);
-      NotificationOpenedProcessor.processFromContext(this, getIntent());
-      finish();
+   public void onReceive(Context context, Intent intent) {
+      NotificationOpenedProcessor.processFromContext(context, intent);
    }
-
-   @Override
-   protected void onNewIntent(Intent intent) {
-      super.onNewIntent(intent);
-      NotificationOpenedProcessor.processFromContext(this, getIntent());
-      finish();
-   }
-
-
 }
