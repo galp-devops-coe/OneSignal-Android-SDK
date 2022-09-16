@@ -2,6 +2,7 @@
   <img src="https://media.onesignal.com/cms/Website%20Layout/logo-red.svg"/>
 </p>
 
+
 ### OneSignal Android Push Notification Plugin
 [![Maven Central](https://maven-badges.herokuapp.com/maven-central/com.onesignal/OneSignal/badge.svg)](https://maven-badges.herokuapp.com/maven-central/com.onesignal/OneSignal) [![Build Status](https://travis-ci.org/OneSignal/OneSignal-Android-SDK.svg?branch=master)](https://travis-ci.org/OneSignal/OneSignal-Android-SDK)
 

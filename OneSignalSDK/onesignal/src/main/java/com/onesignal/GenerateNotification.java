@@ -77,11 +77,11 @@ class GenerateNotification {
    //   notification Intent.
    public static final String BUNDLE_KEY_ONESIGNAL_DATA = "onesignalData";
 
+   private static final Class<?> notificationOpenedClass = NotificationOpenedReceiver.class;
+   private static final Class<?> notificationDismissedClass = NotificationDismissReceiver.class;
+   private static Resources contextResources = null;
    private static Context currentContext = null;
    private static String packageName = null;
-   private static Resources contextResources = null;
-   private static Class<?> notificationOpenedClass;
-   private static boolean openerIsBroadcast;
 
    private static class OneSignalNotificationBuilder {
       NotificationCompat.Builder compatBuilder;
@@ -92,16 +92,6 @@ class GenerateNotification {
       currentContext = inContext;
       packageName = currentContext.getPackageName();
       contextResources = currentContext.getResources();
-
-      PackageManager packageManager = currentContext.getPackageManager();
-      Intent intent = new Intent(currentContext, NotificationOpenedReceiver.class);
-      intent.setPackage(currentContext.getPackageName());
-      if (packageManager.queryBroadcastReceivers(intent, 0).size() > 0) {
-         openerIsBroadcast = true;
-         notificationOpenedClass = NotificationOpenedReceiver.class;
-      }
-      else
-         notificationOpenedClass = NotificationOpenedActivity.class;
    }
 
    static void fromJsonPayload(NotificationGenerationJob notifJob) {
@@ -190,28 +180,23 @@ class GenerateNotification {
    }
 
    private static PendingIntent getNewActionPendingIntent(int requestCode, Intent intent) {
-      if (openerIsBroadcast)
-         return PendingIntent.getBroadcast(currentContext, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
       return PendingIntent.getActivity(currentContext, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
    }
 
-   private static Intent getNewBaseIntent(int notificationId) {
-      Intent intent = new Intent(currentContext, notificationOpenedClass)
-                        .putExtra(BUNDLE_KEY_ANDROID_NOTIFICATION_ID, notificationId);
-
-      if (openerIsBroadcast)
-         return intent;
-      return intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+   private static PendingIntent getNewDismissActionPendingIntent(int requestCode, Intent intent) {
+      return PendingIntent.getBroadcast(currentContext, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
    }
 
-   private static Intent getNewBaseDeleteIntent(int notificationId) {
-      Intent intent = new Intent(currentContext, notificationOpenedClass)
-          .putExtra(BUNDLE_KEY_ANDROID_NOTIFICATION_ID, notificationId)
-          .putExtra("dismissed", true);
-      
-      if (openerIsBroadcast)
-         return intent;
-      return intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+   private static Intent getNewBaseIntent(int notificationId) {
+      return new Intent(currentContext, notificationOpenedClass)
+              .putExtra(BUNDLE_KEY_ANDROID_NOTIFICATION_ID, notificationId)
+              .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+   }
+
+   private static Intent getNewBaseDismissIntent(int notificationId) {
+      return new Intent(currentContext, notificationDismissedClass)
+              .putExtra(BUNDLE_KEY_ANDROID_NOTIFICATION_ID, notificationId)
+              .putExtra("dismissed", true);
    }
    
    private static OneSignalNotificationBuilder getBaseOneSignalNotificationBuilder(NotificationGenerationJob notifJob) {
@@ -383,8 +368,9 @@ class GenerateNotification {
          else
             createSummaryNotification(notifJob, oneSignalNotificationBuilder);
       }
-      else
+      else {
          notification = createGenericPendingIntentsForNotif(notifBuilder, gcmBundle, notificationId);
+      }
 
       // NotificationManagerCompat does not auto omit the individual notification on the device when using
       //   stacked notifications on Android 4.2 and older
@@ -402,7 +388,7 @@ class GenerateNotification {
       Random random = new SecureRandom();
       PendingIntent contentIntent = getNewActionPendingIntent(random.nextInt(), getNewBaseIntent(notificationId).putExtra(BUNDLE_KEY_ONESIGNAL_DATA, gcmBundle.toString()));
       notifBuilder.setContentIntent(contentIntent);
-      PendingIntent deleteIntent = getNewActionPendingIntent(random.nextInt(), getNewBaseDeleteIntent(notificationId));
+      PendingIntent deleteIntent = getNewDismissActionPendingIntent(random.nextInt(), getNewBaseDismissIntent(notificationId));
       notifBuilder.setDeleteIntent(deleteIntent);
       return notifBuilder.build();
    }
@@ -411,14 +397,13 @@ class GenerateNotification {
       Random random = new SecureRandom();
       PendingIntent contentIntent = getNewActionPendingIntent(random.nextInt(), getNewBaseIntent(notificationId).putExtra(BUNDLE_KEY_ONESIGNAL_DATA, gcmBundle.toString()).putExtra("grp", group));
       notifBuilder.setContentIntent(contentIntent);
-      PendingIntent deleteIntent = getNewActionPendingIntent(random.nextInt(), getNewBaseDeleteIntent(notificationId).putExtra("grp", group));
+      PendingIntent deleteIntent = getNewDismissActionPendingIntent(random.nextInt(), getNewBaseDismissIntent(notificationId).putExtra("grp", group));
       notifBuilder.setDeleteIntent(deleteIntent);
       notifBuilder.setGroup(group);
 
       try {
          notifBuilder.setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_SUMMARY);
-      }
-      catch (Throwable t) {
+      } catch (Throwable t) {
          //do nothing in this case...Android support lib 26 isn't in the project
       }
    }
@@ -515,7 +500,7 @@ class GenerateNotification {
       String group = gcmBundle.optString("grp", null);
 
       SecureRandom random = new SecureRandom();
-      PendingIntent summaryDeleteIntent = getNewActionPendingIntent(random.nextInt(), getNewBaseDeleteIntent(0).putExtra("summary", group));
+      PendingIntent summaryDeleteIntent = getNewDismissActionPendingIntent(random.nextInt(), getNewBaseDismissIntent(0).putExtra("summary", group));
       
       Notification summaryNotification;
       Integer summaryNotificationId = null;
@@ -720,7 +705,7 @@ class GenerateNotification {
       int summaryNotificationId = OneSignalNotificationManager.getGrouplessSummaryId();
 
       PendingIntent summaryContentIntent = getNewActionPendingIntent(random.nextInt(), createBaseSummaryIntent(summaryNotificationId, gcmBundle, group));
-      PendingIntent summaryDeleteIntent = getNewActionPendingIntent(random.nextInt(), getNewBaseDeleteIntent(0).putExtra("summary", group));
+      PendingIntent summaryDeleteIntent = getNewDismissActionPendingIntent(random.nextInt(), getNewBaseDismissIntent(0).putExtra("summary", group));
 
       NotificationCompat.Builder summaryBuilder = getBaseOneSignalNotificationBuilder(notifJob).compatBuilder;
       if (notifJob.overriddenSound != null)
