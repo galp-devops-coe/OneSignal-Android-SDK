@@ -2202,6 +2202,7 @@ public class OneSignal {
    }
 
    static boolean startOrResumeApp(Activity inContext) {
+      Log.d("OneSignal.java", "Entered startOrResumeApp method");
       Intent launchIntent = inContext.getPackageManager().getLaunchIntentForPackage(inContext.getPackageName());
       // Make sure we have a launcher intent.
       if (launchIntent != null) {
