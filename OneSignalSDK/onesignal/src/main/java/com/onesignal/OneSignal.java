@@ -2191,8 +2191,11 @@ public class OneSignal {
       if (!defaultOpenActionDisabled)
          urlOpened = openURLFromNotification(inContext, data);
 
+      Log.d("OneSignal.java", "handleNotificationOpen before if.");
+
       // Check if the notification click should lead to a DIRECT session
       if (shouldInitDirectSessionFromNotificationOpen(inContext, fromAlert, urlOpened, defaultOpenActionDisabled)) {
+         Log.d("OneSignal.java", "Inside if.");
          // We want to set the app entry state to NOTIFICATION_CLICK when coming from background
          appEntryState = AppEntryAction.NOTIFICATION_CLICK;
          sessionManager.onDirectInfluenceFromNotificationOpen(appEntryState, notificationId);
@@ -2225,6 +2228,10 @@ public class OneSignal {
     * 5. App open/resume intent exists
     */
    private static boolean shouldInitDirectSessionFromNotificationOpen(Activity context, boolean fromAlert, boolean urlOpened, boolean defaultOpenActionDisabled) {
+      Log.d("OneSignal.java", "fromAlert: " + !fromAlert);
+      Log.d("OneSignal.java", "fromAlert: " + !urlOpened);
+      Log.d("OneSignal.java", "fromAlert: " + !defaultOpenActionDisabled);
+      Log.d("OneSignal.java", "fromAlert: " + !foreground);
       return !fromAlert
               && !urlOpened
               && !defaultOpenActionDisabled
