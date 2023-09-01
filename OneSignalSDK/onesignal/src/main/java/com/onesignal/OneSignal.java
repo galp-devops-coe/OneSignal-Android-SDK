@@ -2230,11 +2230,11 @@ public class OneSignal {
    private static boolean shouldInitDirectSessionFromNotificationOpen(Activity context, boolean fromAlert, boolean urlOpened, boolean defaultOpenActionDisabled) {
       Log.d("OneSignal.java", "fromAlert: " + fromAlert);
       Log.d("OneSignal.java", "!fromAlert: " + !fromAlert);
-      Log.d("OneSignal.java", "urlOpened: " + !urlOpened);
+      Log.d("OneSignal.java", "urlOpened: " + urlOpened);
       Log.d("OneSignal.java", "!urlOpened: " + !urlOpened);
-      Log.d("OneSignal.java", "defaultOpenActionDisabled: " + !defaultOpenActionDisabled);
+      Log.d("OneSignal.java", "defaultOpenActionDisabled: " + defaultOpenActionDisabled);
       Log.d("OneSignal.java", "!defaultOpenActionDisabled: " + !defaultOpenActionDisabled);
-      Log.d("OneSignal.java", "foreground: " + !foreground);
+      Log.d("OneSignal.java", "foreground: " + foreground);
       Log.d("OneSignal.java", "!foreground: " + !foreground);
       return !fromAlert
               && !urlOpened
