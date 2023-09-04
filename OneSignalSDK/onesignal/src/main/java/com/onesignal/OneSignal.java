@@ -2239,7 +2239,7 @@ public class OneSignal {
       return !fromAlert
               && !urlOpened
               && !defaultOpenActionDisabled
-              && !foreground
+              /*&& !foreground*/
               && startOrResumeApp(context);
    }
 
