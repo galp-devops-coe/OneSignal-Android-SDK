@@ -12,7 +12,7 @@ android {
                                 onesignal_google_project_number: '${onesignal_google_project_number}']
         minSdkVersion 26
         targetSdkVersion 31
-        consumerProguardFiles 'consumer-proguard-rules.pro'
+        //consumerProguardFiles 'consumer-proguard-rules.pro'
     }
     
     lintOptions {
