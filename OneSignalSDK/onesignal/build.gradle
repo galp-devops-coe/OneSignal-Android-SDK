@@ -1,7 +1,13 @@
 apply plugin: 'com.android.library'
-
+allprojects {
+    repositories {
+        google()
+        maven {url 'https://developer.huawei.com/repo/'}
+    }
+}
 android {
-    compileSdkVersion 31
+    compileSdk 34
+    namespace "com.onesignal"
     defaultConfig {
         // Normally we shouldn't need to redefine manifestPlaceholders for our onesignal project
         //   but Android Studio gets a sync error if these are not here.
@@ -11,10 +17,9 @@ android {
                                 // Project number pulled from dashboard, local value is ignored
                                 onesignal_google_project_number: '${onesignal_google_project_number}']
         minSdkVersion 26
-        targetSdkVersion 31
+        targetSdk 34
         consumerProguardFiles 'consumer-proguard-rules.pro'
     }
-    
     lintOptions {
         abortOnError false
     }
@@ -72,10 +77,8 @@ dependencies {
     api 'androidx.browser:browser:[1.0.0, 1.99.99]'
     api 'androidx.appcompat:appcompat:[1.0.0, 1.99.99]'
 
-    implementation 'androidx.annotation:annotation-jvm:1.7.0'
-
     implementation "org.jetbrains.kotlin:kotlin-stdlib:1.8.22"
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22"
 }
 
-apply from: 'maven-push.gradle'
+//apply from: 'maven-push.gradle'

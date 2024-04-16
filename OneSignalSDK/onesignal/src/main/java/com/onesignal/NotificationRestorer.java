@@ -189,7 +189,10 @@ class NotificationRestorer {
       if (!cursor.moveToFirst())
          return;
 
-      boolean useExtender = (NotificationExtenderService.getIntent(context) != null);
+      boolean useExtender = false;
+      if(NotificationExtenderService.getIntent(context) != null){
+         useExtender = true;
+      }
 
       do {
          if (useExtender) {
