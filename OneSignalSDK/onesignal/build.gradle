@@ -1,10 +1,4 @@
 apply plugin: 'com.android.library'
-allprojects {
-    repositories {
-        google()
-        maven {url 'https://developer.huawei.com/repo/'}
-    }
-}
 android {
     compileSdk 34
     namespace "com.onesignal"
@@ -13,7 +7,7 @@ android {
         //   but Android Studio gets a sync error if these are not here.
         //      - /gradlew onesignal:assembleRelease is fine from the console.
         // We can't use static values are these are directly added to the AndroidManifest.xml in the .aar file.
-        manifestPlaceholders = [onesignal_app_id: '${onesignal_app_id}',
+        manifestPlaceholders = [onesignal_app_id               : '${onesignal_app_id}',
                                 // Project number pulled from dashboard, local value is ignored
                                 onesignal_google_project_number: '${onesignal_google_project_number}']
         minSdkVersion 26
@@ -69,8 +63,8 @@ dependencies {
 
     // Huawei PushKit
     // KEEP as "compileOnly", so OneSignal isn't a direct dependency in the POM file.
-    compileOnly 'com.huawei.hms:push:4.0.3.301'
-    compileOnly 'com.huawei.hms:location:4.0.0.300'
+    compileOnly 'com.huawei.hms:push:6.11.0.300'
+    compileOnly 'com.huawei.hms:location:6.12.0.300'
 
     api 'androidx.cardview:cardview:[1.0.0, 1.99.99]'
     api 'androidx.legacy:legacy-support-v4:[1.0.0, 1.99.99]'
