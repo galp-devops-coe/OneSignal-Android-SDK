@@ -1,34 +1,50 @@
-apply plugin: 'maven-publish'
+/*
+ * Copyright 2013 Chris Banes
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Code modified by OneSignal
+ *
+ */
+
+apply plugin: 'maven'
 apply plugin: 'signing'
 
+class Global {
+    static def POM_NAME = 'OneSignal'
+    static def POM_ARTIFACT_ID = 'OneSignal'
+    static def POM_PACKAGING = 'aar'
+    static def VERSION_NAME = '3.15.5-OS'
 
-// Define global variables
-ext {
-    pomName = 'OneSignal'
-    pomArtifactId = 'OneSignal'
-    pomPackaging = 'aar'
-    versionName = '3.15.5-OS'
-    groupId = 'com.onesignal'
-    pomDescription = 'OneSignal Android SDK'
-    pomUrl = 'https://github.com/one-signal/OneSignal-Android-SDK'
-    pomScmUrl = 'https://github.com/one-signal/OneSignal-Android-SDK'
-    pomScmConnection = 'scm:git:https://github.com/one-signal/OneSignal-Android-SDK'
-    pomScmDevConnection = 'scm:git:https://github.com/one-signal/OneSignal-Android-SDK'
-    pomLicenseName = 'MIT License'
-    pomLicenseUrl = 'https://raw.githubusercontent.com/one-signal/OneSignal-Android-SDK/master/LICENSE'
-    pomLicenseDist = 'repo'
-    pomDeveloperId = 'OneSignal'
-    pomDeveloperName = 'Josh Kasten'
-    snapshotRepositoryUrl = 'https://oss.sonatype.org/content/repositories/snapshots'
-    releaseRepositoryUrl = 'https://oss.sonatype.org/service/local/staging/deploy/maven2'
+    static def GROUP_ID = 'com.onesignal'
+    static def POM_DESCRIPTION = 'OneSignal Android SDK'
+    static def POM_URL = 'https://github.com/one-signal/OneSignal-Android-SDK'
+    static def POM_SCM_URL = 'https://github.com/one-signal/OneSignal-Android-SDK'
+    static def POM_SCM_CONNECTION = 'scm:git:https://github.com/one-signal/OneSignal-Android-SDK'
+    static def POM_SCM_DEV_CONNECTION = 'scm:git:https://github.com/one-signal/OneSignal-Android-SDK'
+    static def POM_LICENCE_NAME = 'MIT License'
+    static def POM_LICENCE_URL = 'https://raw.githubusercontent.com/one-signal/OneSignal-Android-SDK/master/LICENSE'
+    static def POM_LICENCE_DIST = 'repo'
+    static def POM_DEVELOPER_ID = 'OneSignal'
+    static def POM_DEVELOPER_NAME = 'Josh Kasten'
+    static def SNAPSHOT_REPOSITORY_URL = 'https://oss.sonatype.org/content/repositories/snapshots'
+    static def RELEASE_REPOSITORY_URL = 'https://oss.sonatype.org/service/local/staging/deploy/maven2'
 }
 
-// Check if it's a release build
 def isReleaseBuild() {
-    return !versionName.contains("SNAPSHOT")
+    return !Global.VERSION_NAME.contains("SNAPSHOT")
 }
 
-// Define repository username and password functions
 def getRepositoryUsername() {
     return hasProperty('NEXUS_USERNAME') ? NEXUS_USERNAME : ""
 }
@@ -37,64 +53,74 @@ def getRepositoryPassword() {
     return hasProperty('NEXUS_PASSWORD') ? NEXUS_PASSWORD : ""
 }
 
-// Configure publishing
-publishing {
-    publications {
-        maven(MavenPublication) {
-            //from components.getByName('release')
+afterEvaluate { project ->
+    uploadArchives {
+        repositories {
+            mavenDeployer {
+                beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
 
-            groupId = 'com.github.outsystem'
-            artifactId = 'onesignal-android-sdk'
-            version = '3.15.6-OS4'
+                pom.groupId = Global.GROUP_ID
+                pom.artifactId = Global.POM_ARTIFACT_ID
+                pom.version = Global.VERSION_NAME
 
-            // Configure POM
-            pom {
-                name = pomName
-                packaging = pomPackaging
-                description = pomDescription
-                url = pomUrl
-
-                // SCM information
-                scm {
-                    url = pomScmUrl
-                    connection = pomScmConnection
-                    developerConnection = pomScmDevConnection
+                repository(url: Global.RELEASE_REPOSITORY_URL) {
+                    authentication(userName: getRepositoryUsername(), password: getRepositoryPassword())
+                }
+                snapshotRepository(url: Global.SNAPSHOT_REPOSITORY_URL) {
+                    authentication(userName: getRepositoryUsername(), password: getRepositoryPassword())
                 }
 
-                // License information
-                licenses {
-                    license {
-                        name = pomLicenseName
-                        url = pomLicenseUrl
-                        distribution = pomLicenseDist
+                pom.project {
+                    name Global.POM_NAME
+                    packaging Global.POM_PACKAGING
+                    description Global.POM_DESCRIPTION
+                    url Global.POM_URL
+
+                    scm {
+                        url Global.POM_SCM_URL
+                        connection Global.POM_SCM_CONNECTION
+                        developerConnection Global.POM_SCM_DEV_CONNECTION
                     }
-                }
 
-                // Developer information
-                developers {
-                    developer {
-                        id = pomDeveloperId
-                        name = pomDeveloperName
+                    licenses {
+                        license {
+                            name Global.POM_LICENCE_NAME
+                            url Global.POM_LICENCE_URL
+                            distribution Global.POM_LICENCE_DIST
+                        }
+                    }
+
+                    developers {
+                        developer {
+                            id Global.POM_DEVELOPER_ID
+                            name Global.POM_DEVELOPER_NAME
+                        }
                     }
                 }
             }
         }
     }
 
-    // Configure repositories
-    repositories {
-        maven {
-            url = isReleaseBuild() ? releaseRepositoryUrl : snapshotRepositoryUrl
-            credentials {
-                username = getRepositoryUsername()
-                password = getRepositoryPassword()
-            }
-        }
+    signing {
+        required { isReleaseBuild() && gradle.taskGraph.hasTask("uploadArchives") }
+        sign configurations.archives
     }
-}
 
-// Configure signing
-signing {
-    required { isReleaseBuild() && gradle.taskGraph.hasTask("publish") }
-    sign publishing.publications
+    //task androidJavadocs(type: Javadoc) {
+    //source = android.sourceSets.main.allJava
+    //}
+
+    //task androidJavadocsJar(type: Jar, dependsOn: androidJavadocs) {
+    //classifier = 'javadoc'
+    //from androidJavadocs.destinationDir
+    //}
+
+    task androidSourcesJar(type: Jar) {
+        classifier = 'sources'
+        from android.sourceSets.main.java.sourceFiles
+    }
+
+    artifacts {
+        archives androidSourcesJar
+    }
 }
