@@ -22,7 +22,7 @@ steps:
     jdkArchitectureOption: 'x64'
     publishJUnitResults: false
     testResultsFiles: '**/TEST-*.xml'
-    tasks: 'clean build -x'
+    tasks: 'clean build'
 - task: CmdLine@2
   displayName: Validate pom.xml
   inputs:
