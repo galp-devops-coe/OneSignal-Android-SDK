@@ -30,6 +30,9 @@ android {
             minifyEnabled false
         }
     }
+    buildFeatures {
+        buildConfig = true
+    }
 }
 
 // api || implementation = compile and runtime
