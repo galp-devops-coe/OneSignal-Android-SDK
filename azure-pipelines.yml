@@ -23,6 +23,7 @@ steps:
     publishJUnitResults: false
     testResultsFiles: '**/TEST-*.xml'
     tasks: 'clean build'
+    # tasks: 'clean build -x :unittest:check'
 - task: CmdLine@2
   displayName: Validate pom.xml
   inputs:

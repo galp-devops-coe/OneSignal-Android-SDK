@@ -1,2 +1,3 @@
 include ':onesignal'
 //removed inclusion of app and unit test modules for aar building
+// include ':onesignal', ':unittest'
