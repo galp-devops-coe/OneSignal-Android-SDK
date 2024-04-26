@@ -18,7 +18,7 @@ steps:
     gradleWrapperFile: './OneSignalSDK/gradlew'
     gradleOptions: '-Xmx4096M'
     javaHomeOption: 'JDKVersion'
-    jdkVersionOption: '11'
+    jdkVersionOption: '1.8'
     jdkArchitectureOption: 'x64'
     publishJUnitResults: false
     testResultsFiles: '**/TEST-*.xml'
