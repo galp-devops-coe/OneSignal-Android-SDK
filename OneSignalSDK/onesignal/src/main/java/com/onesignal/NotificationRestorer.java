@@ -188,8 +188,11 @@ class NotificationRestorer {
    static void showNotificationsFromCursor(Context context, Cursor cursor, int delay) {
       if (!cursor.moveToFirst())
          return;
-
-      boolean useExtender = (NotificationExtenderService.getIntent(context) != null);
+      //Changed inline call to conditional call to avoid thread deadlock and potential ANR when null pointer exception is thrown.
+      boolean useExtender = false;
+      if(NotificationExtenderService.getIntent(context) != null){
+         useExtender = true;
+      }
 
       do {
          if (useExtender) {
