@@ -64,6 +64,9 @@ dependencies {
     // firebase-messaging:17.6.0 is the max version since we still have code looking for FirebaseInstanceIdService
     api 'com.google.firebase:firebase-messaging:17.6.0'
 
+
+    implementation 'com.google.firebase:firebase-iid:21.1.0'
+
     // Huawei PushKit
     // KEEP as "compileOnly", so OneSignal isn't a direct dependency in the POM file.
     compileOnly 'com.huawei.hms:push:6.11.0.300'
